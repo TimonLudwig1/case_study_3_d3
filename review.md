@@ -55,4 +55,11 @@ we see: Closed at anchor_factor=0.25: ['Orense', 'Avila', 'Cordoba', 'Guadalajar
 
 2. Falling Cash demand: we test what happens when annual demand drops by: 10%, 30% and 50%. Findings: Network unchanged at -10%. At -30% one "v" center closes and at -50% two more close. "s" and "m" center remain unchanged. The centers that were closed [Burgos, Lugo] were not yet notable. No overlap to other closed centers
 
-3. Rising wages and fuel costs: we test a 
+3. Rising wages and fuel costs: we test the effect of a 20% and 50% shift cost. Findings: at largest cost increase, the network shifts toward fewer very small and more medium centers. At +20% there is an interesting finding: The network briefly opens an addition 19th center, with a slightely shifted tier mix. The newly opened centers at +50% are Sevilla (agian) and Valencia. 
+
+4. New technology: we test two "new technology" approaches: 
+- No crew (shift cost falls to 40% of todays value)
+- autonomous + 24/7 + faster: additionally, vehicles can operate around the clock (usable time per shift: 450 to 900 minutes) and travel faster (travel time × 0.8).
+- Findings: way more feasible links in autonomous_full scenario (11548), soltions: autonomous_no_crew: n_open=15, tiers={'v': 9, 's': 5, 'm': 1}; autonomous_full: n_open=4, tiers={'v': 2, 's': 2}; but here the "no volume cap" decision strikes again. We basically only use 4 small warehouses that shoulder all of spains demand
+
+My final idea: Because we did not introduce Volume caps, we should check our model again, looking at the volume each center covers, before the final recomendation. Maybe we should argue that we should open some centers that were not in the cost optimal network, but make sense to include because they a) were noticable in the sensitivity analysis or b) we make a statement saying: in this solution there is too much volume on the small centers, we open for example the big one in Madrid as a decision. After this we rerun the solution on the final recomendet model and compare to the "free optimal model". If there isn't a significant cost increase this would be a better soltution because it is more robust (we found that in the sensitivity analysis). I think this might be a way of "using volume caps without using volume caps"
