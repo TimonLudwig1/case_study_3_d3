@@ -55,4 +55,4 @@ we see: Closed at anchor_factor=0.25: ['Orense', 'Avila', 'Cordoba', 'Guadalajar
 
 2. Falling Cash demand: we test what happens when annual demand drops by: 10%, 30% and 50%. Findings: Network unchanged at -10%. At -30% one "v" center closes and at -50% two more close. "s" and "m" center remain unchanged. The centers that were closed [Burgos, Lugo] were not yet notable. No overlap to other closed centers
 
-3. Rising wages and fuel costs:
+3. Rising wages and fuel costs: we test a 
