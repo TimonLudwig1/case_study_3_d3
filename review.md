@@ -29,7 +29,8 @@
 
 - comparison model: we decided to cap volume at 1.5x 75% percentile from the uncapped solution, excluding the outlier. This is not really based on anything, we just use it as a simple way of building a comparison model to see if there were significant differences. Findings: 
 1. total cost: +29,720,806, +1 open center, tier mix(new): v:11; s:6; m:1; l:0; h:1, tier mix(old): v:13; s:4; m:1; l:0; h:0. Madrid was the newly opened big warehouse and Guadalajara was closed. 
-2. We see this as a recomendation. If Guadalajara can be ugraded and still be cheaper than madrid after that upgrade, they should do so. Otherwise a different tier mix would be better. 
+
+- we tried using the volume bounds we found in the lectures notebook. With that we could not build a feasible model, because Region 410 exceeds the maximum capacity of every cash center within its service range. 
 
 ## Sensitivity Analysis
 
@@ -37,20 +38,8 @@
 1. Economoes of scale strength (alpha) and pct of medain (15%):
 - alpha: we varied alpha from: 0.3; 0.5; 0.7 and 1.0: Findings: at 0.3 and 0.5 we have 18 open centers. At 0.7 and 1.0 we have 17 open. So we looked closer at 0.5 (base) vs. 1.0: at 1.0, five small centers closed (Avila, Cordoba, Guadalajara, Huelva, and Orense) and 4 larger centers opened (Pontevedra, Sevilla, Toledo, and Zamora). We looked at the reassignement next: 189 regions were reassigned, most of those came directly from closing centers (Regions that belonged to the 5 closed centers: 158). Sevilla absorbed all 35 regions previously split between Huelva and Cordoba. Summary: stronger economies of scale reward moderate consolidation into the next tier up.
 
-- processing-cost anchor: we resolved the model with 10%, 15% and 25%: similar but more modest sensitvity to alpha: cost shift to a max of around +10% (for 15% of median). Tier mix only shifts slightely at the upper end (processing_share=0.15: n_open=18, tiers={'v': 13, 's': 4, 'm': 1} processing_share=0.25: n_open=17, tiers={'v': 10, 's': 5, 'm': 2}). I added new code here: 
+- processing-cost anchor: we resolved the model with 10%, 15% and 25%: similar but more modest sensitvity to alpha: cost shift to a max of around +10% (for 15% of median). Tier mix only shifts slightely at the upper end (processing_share=0.15: n_open=18, tiers={'v': 13, 's': 4, 'm': 1} processing_share=0.25: n_open=17, tiers={'v': 10, 's': 5, 'm': 2}).  
 
-```python
-closed_anchor = set(anchor_results[0.15]["open_centers"]) - set(anchor_results[0.25]["open_centers"])
-print(f"Closed at anchor_factor={0.25}:", warehouses_flat.set_index("warehouseID").loc[list(closed_anchor), "city"].tolist())
-opened_anchor = set(anchor_results[0.25]["open_centers"]) - set(anchor_results[0.15]["open_centers"])
-
-print(
-    "Opened at anchor_factor={0.25}:",
-    warehouses_flat.set_index("warehouseID")
-                   .loc[list(opened_anchor), "city"]
-                   .tolist()
-)
-```
 we see: Closed at anchor_factor=0.25: ['Orense', 'Avila', 'Cordoba', 'Guadalajara', 'Huelva']; Opened at anchor_factor=0.25: ['Sevilla', 'Pontevedra', 'Toledo', 'Zamora']; (I did not check reassignment here yet - tell me if I should). Those centers mimik the 4 centers opened at the alpha check. This is a very strong point for our final recomendation.
 
 2. Falling Cash demand: we test what happens when annual demand drops by: 10%, 30% and 50%. Findings: Network unchanged at -10%. At -30% one "v" center closes and at -50% two more close. "s" and "m" center remain unchanged. The centers that were closed [Burgos, Lugo] were not yet notable. No overlap to other closed centers
@@ -62,4 +51,29 @@ we see: Closed at anchor_factor=0.25: ['Orense', 'Avila', 'Cordoba', 'Guadalajar
 - autonomous + 24/7 + faster: additionally, vehicles can operate around the clock (usable time per shift: 450 to 900 minutes) and travel faster (travel time × 0.8).
 - Findings: way more feasible links in autonomous_full scenario (11548), soltions: autonomous_no_crew: n_open=15, tiers={'v': 9, 's': 5, 'm': 1}; autonomous_full: n_open=4, tiers={'v': 2, 's': 2}; but here the "no volume cap" decision strikes again. We basically only use 4 small warehouses that shoulder all of spains demand
 
-My final idea: Because we did not introduce Volume caps, we should check our model again, looking at the volume each center covers, before the final recomendation. Maybe we should argue that we should open some centers that were not in the cost optimal network, but make sense to include because they a) were noticable in the sensitivity analysis or b) we make a statement saying: in this solution there is too much volume on the small centers, we open for example the big one in Madrid as a decision. After this we rerun the solution on the final recomendet model and compare to the "free optimal model". If there isn't a significant cost increase this would be a better soltution because it is more robust (we found that in the sensitivity analysis). I think this might be a way of "using volume caps without using volume caps"
+5. Overlap comparison: because the sensitivity analysis was only performed on the model that structurally will assign too much volume on cheap centers, we did an overlap comparison with our capped model. So that we can identify candidates to keep. We decided to basically favor the capped model because it is more ralistic than a no cap model. We found:
+
+In capped, but not in alpha=1.0: {32, 39, 14, 21, 25, 28}
+In alpha=1.0, but not in capped: {9, 36, 45, 41}
+
+Overlap capped vs alpha=1.0: 13 of 19 capped centers are also open in alpha=1.0
+Overlap capped vs anchor=0.25: 13 of 19 capped centers are also open in anchor=0.25
+Overlap capped vs shiftcost=1.5: 12 of 19 capped centers are also open in shiftcost=1.5
+
+And our final recomendation was:
+
+**Keep — the stable core (10 centers).** Vitoria, Alicante, Almeria, Caceres, Gerona, Huesca, Jaen, Leon, Tarragona, and Cuenca remain open in 10 or 11 of the 11 economic scenarios and are also selected by the capacity-constrained model. These centers form the robust backbone of the recommended network and remain stable under virtually every future we tested.
+
+**Review — demand-sensitive (3 centers).** Burgos, Lugo, and Teruel remain open in 9 of the 11 economic scenarios but are not consistently selected under all assumptions. They do not currently warrant structural changes, but should be monitored if demand patterns shift.
+
+**Reconsider — potential consolidation candidates (5 centers).** Avila, Guadalajara, Cordoba, Huelva, and Orense are part of today's network but lose their role under several alternative assumptions, including stronger economies of scale and, in several cases, the capacity-constrained model. Guadalajara remains particularly noteworthy because our volume analysis identified it as carrying an implausibly high throughput in the unconstrained solution. These locations are the strongest candidates for network consolidation or operational review.
+
+**Confirmed closed (15 centers).** Barcelona, Ciudad Real, La Coruña, Granada, San Sebastian, La Rioja, Navarra, Oviedo, Palencia, Salamanca, Segovia, Soria, Valladolid, Bilbao, and Zaragoza never appear in any recommended network, neither across the 11 economic scenarios nor under the capacity-constrained model. This provides the strongest possible evidence that these facilities are not required in the future network. Barcelona is especially notable: despite being a large ("l") center, it never becomes attractive, whereas Madrid (tier "h") does once realistic capacity limits are introduced.
+
+**Expansion candidate — capacity + economic (1 center).** Zamora is the strongest expansion signal in the entire analysis. It is selected by the capacity-constrained model and also appears in five of the eleven economic scenarios, making it a location supported independently by both modelling approaches.
+
+**Expansion candidate — capacity-driven (3 centers).** Madrid, Lerida, and Santander basically (Santander once econ) appear only when realistic capacity constraints are introduced. Although they receive little support from the purely economic scenarios, this reflects the fact that those models assume unlimited facility capacity. Since capacity realism is considered our preferred planning perspective, these locations deserve serious consideration.
+
+**Expansion candidate — economic stress only (4 centers).** Pontevedra and Sevilla receive the strongest support within this group, each appearing in four economic scenarios, followed by Toledo (three) and Valencia (two). Because none are confirmed by the capacity-constrained model, these represent secondary expansion opportunities rather than immediate recommendations.
+
+**Negligible (1 center).** Albacete appears in only a single economic scenario and is not supported by the capacity-constrained model. We therefore do not draw any practical conclusion from this isolated result.
