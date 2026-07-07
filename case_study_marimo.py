@@ -143,6 +143,7 @@ def _():
         folium,
         mcolors,
         mo,
+        np,
         pd,
         pl,
         plt,
@@ -844,22 +845,46 @@ def _(c_var_by_tier, cost_base, regions_flat, warehouses_flat):
 
 @app.cell
 def _(model_data, pl, regions_flat, warehouses_flat):
-    prob = pl.LpProblem('CashLog_Extended', pl.LpMinimize)
-    link_keys = list(zip(model_data['warehouseID'], model_data['regionID']))
-    x = pl.LpVariable.dicts('x', link_keys, cat='Binary')
-    all_warehouse_ids = warehouses_flat['warehouseID'].tolist()
-    y = pl.LpVariable.dicts('y', all_warehouse_ids, cat='Binary')
-    transport_and_processing_cost = pl.lpSum((_row.effective_cost * x[_row.warehouseID, _row.regionID] for _row in model_data.itertuples()))
-    fixed_cost = pl.lpSum((f * y[_i] for _i, f in zip(warehouses_flat['warehouseID'], warehouses_flat['fixedCosts'])))
-    prob = prob + (transport_and_processing_cost + fixed_cost)
-    for _i, _j in link_keys:
-        prob = prob + (x[_i, _j] <= y[_i])
-    for _j in regions_flat['regionID']:
-        _reachable_i = [_i for _i, jj in link_keys if jj == _j]
-        prob = prob + (pl.lpSum((x[_i, _j] for _i in _reachable_i)) == 1)
+    # step 2: pulp problem setup
+
+    prob = pl.LpProblem("CashLog_Extended", pl.LpMinimize)
+
+    # x_ij nur für die 2.661 tatsächlich erreichbaren Paare, kein Big-M nötig 
+    link_keys = list(zip(model_data["warehouseID"], model_data["regionID"]))
+    x = pl.LpVariable.dicts("x", link_keys, cat="Binary")
+
+    # y_i für alle 42 Center
+    all_warehouse_ids = warehouses_flat["warehouseID"].tolist()
+    y = pl.LpVariable.dicts("y", all_warehouse_ids, cat="Binary")
+
+    #objective function
+
+    transport_and_processing_cost = pl.lpSum(
+        row.effective_cost * x[(row.warehouseID, row.regionID)]
+        for row in model_data.itertuples()
+    )
+    fixed_cost = pl.lpSum(
+        f * y[i] for i, f in zip(warehouses_flat["warehouseID"], warehouses_flat["fixedCosts"])
+    )
+
+    prob += transport_and_processing_cost + fixed_cost
+
+    #constraints
+
+    # Region kann nur einem offenen Center zugeordnet werden
+    for i, j in link_keys:
+        prob += x[(i, j)] <= y[i]
+
+    # jede Region wird genau einem (erreichbaren) Center zugeordnet
+    for j in regions_flat["regionID"]:
+        reachable_i = [i for (i, jj) in link_keys if jj == j]
+        prob += pl.lpSum(x[(i, j)] for i in reachable_i) == 1
+
+    #solve the problem
+
     status = prob.solve(pl.PULP_CBC_CMD(msg=1))
-    print('Status:', pl.LpStatus[status])
-    print('Total cost: €', round(pl.value(prob.objective), 2))
+    print("Status:", pl.LpStatus[status])
+    print("Total cost: €", round(pl.value(prob.objective), 2))
     return all_warehouse_ids, link_keys, x, y
 
 
@@ -1056,50 +1081,76 @@ def _(
     stop_time_by_region,
     warehouses_flat,
 ):
-    OFFICIAL_V_BOUNDS = {'v': (0, 19348), 's': (19349, 45415), 'm': (45416, 107327), 'l': (107328, 199999), 'h': (200000, 99999999)}
+    OFFICIAL_V_BOUNDS = {   #volume bounds per tier, from the official lecutre notebook
+        "v": (0, 19_348),
+        "s": (19_349, 45_415),
+        "m": (45_416, 107_327),
+        "l": (107_328, 199_999),
+        "h": (200_000, 99_999_999),
+    }
 
-    def solve_network(alpha=alpha, demand_factor=1.0, shift_cost=shift_cost_base, shift_min=shift_min, travel_factor=1.0, processing_share=processing_share, force_open=None, force_closed=None, use_official_bounds=False):
-        c_var_anchor_local = processing_share * median_transport_per_delivery
-        c_var = {t: c_var_anchor_local / scale_factor[t] ** alpha for t in scale_factor}
-        usable = shift_min - 2 * shifts_long['travelTime'] * travel_factor
+    def solve_network(alpha=alpha, demand_factor=1.0, shift_cost=shift_cost_base,
+                       shift_min=shift_min, travel_factor=1.0, processing_share=processing_share, force_open=None, force_closed=None, use_official_bounds=False):
+        # 1. variable costs per tier unter den neuen Annahmen
+        c_var_anchor_local = processing_share * median_transport_per_delivery   
+        c_var = {t: c_var_anchor_local / (scale_factor[t] ** alpha) for t in scale_factor}
+    
+        # 2. effektive Kosten neu berechnen (Nachfrage-/Schicht-/Fahrzeit-Faktoren einbezogen)
+        usable = shift_min - 2 * shifts_long["travelTime"] * travel_factor
         feasible = usable > 0
-        dem = shifts_long['regionID'].map(demand_by_region) * demand_factor
-        mps = shifts_long['regionID'].map(stop_time_by_region)
+        dem = shifts_long["regionID"].map(demand_by_region) * demand_factor
+        mps = shifts_long["regionID"].map(stop_time_by_region)
         cost = shift_cost * dem * mps / usable
+
         md = shifts_long[feasible].copy()
-        md['transportationCosts'] = cost[feasible]
-        md = md.merge(regions_flat[['regionID', 'yearlyDemand']], on='regionID')
-        md = md.merge(warehouses_flat[['warehouseID', 'tier', 'fixedCosts']], on='warehouseID')
-        md['yearlyDemand'] = md['yearlyDemand'] * demand_factor
-        md['c_var_i'] = md['tier'].map(c_var)
-        md['effective_cost'] = md['transportationCosts'] + md['c_var_i'] * md['yearlyDemand']
-        keys = list(zip(md['warehouseID'], md['regionID']))
-        xs = pl.LpVariable.dicts('x', keys, cat='Binary')
-        ys = pl.LpVariable.dicts('y', all_warehouse_ids, cat='Binary')
-        prob = pl.LpProblem('scenario', pl.LpMinimize)
-        prob = prob + (pl.lpSum((_row.effective_cost * xs[_row.warehouseID, _row.regionID] for _row in md.itertuples())) + pl.lpSum((f * ys[_i] for _i, f in zip(warehouses_flat['warehouseID'], warehouses_flat['fixedCosts']))))
-        for _i, _j in keys:
-            prob = prob + (xs[_i, _j] <= ys[_i])
-        for _j in regions_flat['regionID']:
-            reach = [_i for _i, jj in keys if jj == _j]
-            prob = prob + (pl.lpSum((xs[_i, _j] for _i in reach)) == 1)
+        md["transportationCosts"] = cost[feasible]
+        md = md.merge(regions_flat[["regionID", "yearlyDemand"]], on="regionID")
+        md = md.merge(warehouses_flat[["warehouseID", "tier", "fixedCosts"]], on="warehouseID")
+        md["yearlyDemand"] = md["yearlyDemand"] * demand_factor
+        md["c_var_i"] = md["tier"].map(c_var)
+        md["effective_cost"] = md["transportationCosts"] + md["c_var_i"] * md["yearlyDemand"]
+
+        # 3. PuLP-Modell
+        keys = list(zip(md["warehouseID"], md["regionID"]))
+        xs = pl.LpVariable.dicts("x", keys, cat="Binary")
+        ys = pl.LpVariable.dicts("y", all_warehouse_ids, cat="Binary")
+
+        prob = pl.LpProblem("scenario", pl.LpMinimize)
+        prob += pl.lpSum(row.effective_cost * xs[(row.warehouseID, row.regionID)] for row in md.itertuples()) \
+              + pl.lpSum(f * ys[i] for i, f in zip(warehouses_flat["warehouseID"], warehouses_flat["fixedCosts"]))
+        for i, j in keys:
+            prob += xs[(i, j)] <= ys[i]
+        for j in regions_flat["regionID"]:
+            reach = [i for (i, jj) in keys if jj == j]
+            prob += pl.lpSum(xs[(i, j)] for i in reach) == 1
+
+        #falls volumen caps verwendet werden
         if use_official_bounds:
-            tier_by_wh = warehouses_flat.set_index('warehouseID')['tier']
-            demand_lookup = md.set_index(['warehouseID', 'regionID'])['yearlyDemand']
-            for _i in all_warehouse_ids:
-                lb, ub = OFFICIAL_V_BOUNDS[tier_by_wh[_i]]
-                links_i = [(ii, _j) for ii, _j in keys if ii == _i]
-                demand_expr = pl.lpSum((demand_lookup[_i, _j] * xs[_i, _j] for ii, _j in links_i))
-                prob = prob + (demand_expr <= ub * ys[_i])
-                prob = prob + (demand_expr >= lb * ys[_i])
-        for _i in force_open or []:
-            prob = prob + (ys[_i] == 1)
-        for _i in force_closed or []:
-            prob = prob + (ys[_i] == 0)
+            tier_by_wh = warehouses_flat.set_index("warehouseID")["tier"]
+            demand_lookup = md.set_index(["warehouseID", "regionID"])["yearlyDemand"]
+            for i in all_warehouse_ids:
+                lb, ub = OFFICIAL_V_BOUNDS[tier_by_wh[i]]
+                links_i = [(ii, j) for (ii, j) in keys if ii == i]
+                demand_expr = pl.lpSum(demand_lookup[(i, j)] * xs[(i, j)] for (ii, j) in links_i)
+                prob += demand_expr <= ub * ys[i]
+                prob += demand_expr >= lb * ys[i]
+
+        #force_open/force_closed constraints
+        for i in (force_open or []):
+            prob += ys[i] == 1
+        for i in (force_closed or []):
+            prob += ys[i] == 0
+
         prob.solve(pl.PULP_CBC_CMD(msg=0))
-        open_ids = [_i for _i in all_warehouse_ids if ys[_i].value() == 1]
-        assignment = [(_i, _j) for _i, _j in keys if xs[_i, _j].value() == 1]
-        return {'status': pl.LpStatus[prob.status], 'total_cost': pl.value(prob.objective), 'open_centers': open_ids, 'n_open': len(open_ids), 'assignment': assignment}
+        open_ids = [i for i in all_warehouse_ids if ys[i].value() == 1]
+        assignment = [(i, j) for (i, j) in keys if xs[(i, j)].value() == 1]
+        return {
+            "status": pl.LpStatus[prob.status],
+            "total_cost": pl.value(prob.objective),
+            "open_centers": open_ids,
+            "n_open": len(open_ids),
+            "assignment": assignment,
+        }
 
     return OFFICIAL_V_BOUNDS, solve_network
 
@@ -1139,26 +1190,44 @@ def _(
     regions_flat,
     warehouses_flat,
 ):
-    warehouse_tier = warehouses_flat.set_index('warehouseID')['tier']
-    prob_capped = pl.LpProblem('CashLog_Extended_Capped', pl.LpMinimize)
-    x_c = pl.LpVariable.dicts('x', link_keys, cat='Binary')
-    y_c = pl.LpVariable.dicts('y', all_warehouse_ids, cat='Binary')
-    prob_capped = prob_capped + (pl.lpSum((_row.effective_cost * x_c[_row.warehouseID, _row.regionID] for _row in model_data.itertuples())) + pl.lpSum((f * y_c[_i] for _i, f in zip(warehouses_flat['warehouseID'], warehouses_flat['fixedCosts']))))
-    for _i, _j in link_keys:
-        prob_capped = prob_capped + (x_c[_i, _j] <= y_c[_i])
-    for _j in regions_flat['regionID']:
-        _reachable_i = [_i for _i, jj in link_keys if jj == _j]
-        prob_capped = prob_capped + (pl.lpSum((x_c[_i, _j] for _i in _reachable_i)) == 1)
-    demand_by_link = model_data.set_index(['warehouseID', 'regionID'])['yearlyDemand']
-    for _i in all_warehouse_ids:
-        cap = V_ub_by_tier[warehouse_tier[_i]]
-        if cap == float('inf'):
-            continue
-        links_for_i = [(ii, _j) for ii, _j in link_keys if ii == _i]
-        prob_capped = prob_capped + (pl.lpSum((demand_by_link[_i, _j] * x_c[_i, _j] for ii, _j in links_for_i)) <= cap * y_c[_i])
+    warehouse_tier = warehouses_flat.set_index("warehouseID")["tier"]
+
+
+    prob_capped = pl.LpProblem("CashLog_Extended_Capped", pl.LpMinimize)
+    x_c = pl.LpVariable.dicts("x", link_keys, cat="Binary")
+    y_c = pl.LpVariable.dicts("y", all_warehouse_ids, cat="Binary")
+
+
+    prob_capped += pl.lpSum(
+        row.effective_cost * x_c[(row.warehouseID, row.regionID)] for row in model_data.itertuples()
+    ) + pl.lpSum(f * y_c[wh] for wh, f in zip(warehouses_flat["warehouseID"], warehouses_flat["fixedCosts"]))
+
+
+    for wh, reg in link_keys:
+        prob_capped += x_c[(wh, reg)] <= y_c[wh]
+
+    for reg in regions_flat["regionID"]:
+        reachable_wh = [wh for (wh, jj) in link_keys if jj == reg]
+        prob_capped += pl.lpSum(x_c[(wh, reg)] for wh in reachable_wh) == 1
+
+
+    demand_by_link = model_data.set_index(["warehouseID", "regionID"])["yearlyDemand"]
+
+    for wh in all_warehouse_ids:
+        cap = V_ub_by_tier[warehouse_tier[wh]]
+        if cap == float("inf"):
+            continue  # l/h bleiben ungekappt, siehe Begründung oben
+
+        links_for_wh = [(ii, reg) for (ii, reg) in link_keys if ii == wh]
+
+        prob_capped += pl.lpSum(
+            demand_by_link[(wh, reg)] * x_c[(wh, reg)] for (ii, reg) in links_for_wh
+        ) <= cap * y_c[wh]
+
+
     status_c = prob_capped.solve(pl.PULP_CBC_CMD(msg=0))
-    print('Status:', pl.LpStatus[status_c])
-    print('Total cost: €', round(pl.value(prob_capped.objective), 2))
+    print("Status:", pl.LpStatus[status_c])
+    print("Total cost: €", round(pl.value(prob_capped.objective), 2))
     return x_c, y_c
 
 
@@ -1282,48 +1351,72 @@ def _(
     stop_time_by_region,
     warehouses_flat,
 ):
-    def solve_network_debug(use_upper_only=True, alpha=alpha, demand_factor=1.0, shift_cost=shift_cost_base, force_open=None, force_closed=None, travel_factor=1.0, use_official_bounds=False):
-        c_var_anchor_local = processing_share * median_transport_per_delivery
-        c_var = {t: c_var_anchor_local / scale_factor[t] ** alpha for t in scale_factor}
-        usable = shift_min - 2 * shifts_long['travelTime'] * travel_factor
+    #debugging function to check if the model is feasible with official volume bounds
+    def solve_network_debug(use_upper_only=True, alpha=alpha, demand_factor=1.0, shift_cost=shift_cost_base,
+                      force_open=None, force_closed=None, travel_factor=1.0, use_official_bounds=False):
+        # 1. variable costs per tier unter den neuen Annahmen
+        c_var_anchor_local = processing_share * median_transport_per_delivery   
+        c_var = {t: c_var_anchor_local / (scale_factor[t] ** alpha) for t in scale_factor}
+    
+        # 2. effektive Kosten neu berechnen (Nachfrage-/Schicht-/Fahrzeit-Faktoren einbezogen)
+        usable = shift_min - 2 * shifts_long["travelTime"] * travel_factor
         feasible = usable > 0
-        dem = shifts_long['regionID'].map(demand_by_region) * demand_factor
-        mps = shifts_long['regionID'].map(stop_time_by_region)
+        dem = shifts_long["regionID"].map(demand_by_region) * demand_factor
+        mps = shifts_long["regionID"].map(stop_time_by_region)
         cost = shift_cost * dem * mps / usable
+
         md = shifts_long[feasible].copy()
-        md['transportationCosts'] = cost[feasible]
-        md = md.merge(regions_flat[['regionID', 'yearlyDemand']], on='regionID')
-        md = md.merge(warehouses_flat[['warehouseID', 'tier', 'fixedCosts']], on='warehouseID')
-        md['yearlyDemand'] = md['yearlyDemand'] * demand_factor
-        md['c_var_i'] = md['tier'].map(c_var)
-        md['effective_cost'] = md['transportationCosts'] + md['c_var_i'] * md['yearlyDemand']
-        keys = list(zip(md['warehouseID'], md['regionID']))
-        xs = pl.LpVariable.dicts('x', keys, cat='Binary')
-        ys = pl.LpVariable.dicts('y', all_warehouse_ids, cat='Binary')
-        prob = pl.LpProblem('scenario', pl.LpMinimize)
-        prob = prob + (pl.lpSum((_row.effective_cost * xs[_row.warehouseID, _row.regionID] for _row in md.itertuples())) + pl.lpSum((f * ys[_i] for _i, f in zip(warehouses_flat['warehouseID'], warehouses_flat['fixedCosts']))))
-        for _i, _j in keys:
-            prob = prob + (xs[_i, _j] <= ys[_i])
-        for _j in regions_flat['regionID']:
-            reach = [_i for _i, jj in keys if jj == _j]
-            prob = prob + (pl.lpSum((xs[_i, _j] for _i in reach)) == 1)
-        print(md.set_index(['warehouseID', 'regionID']).index.duplicated().sum())
+        md["transportationCosts"] = cost[feasible]
+        md = md.merge(regions_flat[["regionID", "yearlyDemand"]], on="regionID")
+        md = md.merge(warehouses_flat[["warehouseID", "tier", "fixedCosts"]], on="warehouseID")
+        md["yearlyDemand"] = md["yearlyDemand"] * demand_factor
+        md["c_var_i"] = md["tier"].map(c_var)
+        md["effective_cost"] = md["transportationCosts"] + md["c_var_i"] * md["yearlyDemand"]
+
+        # 3. PuLP-Modell
+        keys = list(zip(md["warehouseID"], md["regionID"]))
+        xs = pl.LpVariable.dicts("x", keys, cat="Binary")
+        ys = pl.LpVariable.dicts("y", all_warehouse_ids, cat="Binary")
+
+        prob = pl.LpProblem("scenario", pl.LpMinimize)
+        prob += pl.lpSum(row.effective_cost * xs[(row.warehouseID, row.regionID)] for row in md.itertuples()) \
+              + pl.lpSum(f * ys[i] for i, f in zip(warehouses_flat["warehouseID"], warehouses_flat["fixedCosts"]))
+        for i, j in keys:
+            prob += xs[(i, j)] <= ys[i]
+        for j in regions_flat["regionID"]:
+            reach = [i for (i, jj) in keys if jj == j]
+            prob += pl.lpSum(xs[(i, j)] for i in reach) == 1
+        print(md.set_index(["warehouseID", "regionID"]).index.duplicated().sum())
+        #falls volumen caps verwendet werden
         if use_official_bounds:
-            tier_by_wh = warehouses_flat.set_index('warehouseID')['tier']
-            demand_lookup = md.set_index(['warehouseID', 'regionID'])['yearlyDemand']
-            for _i in all_warehouse_ids:
-                lb, ub = OFFICIAL_V_BOUNDS[tier_by_wh[_i]]
-                links_i = [(ii, _j) for ii, _j in keys if ii == _i]
-                demand_expr = pl.lpSum((demand_lookup[_i, _j] * xs[_i, _j] for ii, _j in links_i))
-                prob = prob + (demand_expr <= ub * ys[_i])
-        for _i in force_open or []:
-            prob = prob + (ys[_i] == 1)
-        for _i in force_closed or []:
-            prob = prob + (ys[_i] == 0)
+            tier_by_wh = warehouses_flat.set_index("warehouseID")["tier"]
+            demand_lookup = md.set_index(["warehouseID", "regionID"])["yearlyDemand"]
+            for i in all_warehouse_ids:
+                lb, ub = OFFICIAL_V_BOUNDS[tier_by_wh[i]]
+                links_i = [(ii, j) for (ii, j) in keys if ii == i]
+                demand_expr = pl.lpSum(demand_lookup[(i, j)] * xs[(i, j)] for (ii, j) in links_i)
+                prob += demand_expr <= ub * ys[i]
+                #prob += demand_expr >= lb * ys[i]
+
+        #force_open/force_closed constraints
+        for i in (force_open or []):
+            prob += ys[i] == 1
+        for i in (force_closed or []):
+            prob += ys[i] == 0
+
         prob.solve(pl.PULP_CBC_CMD(msg=0))
-        open_ids = [_i for _i in all_warehouse_ids if ys[_i].value() == 1]
-        assignment = [(_i, _j) for _i, _j in keys if xs[_i, _j].value() == 1]
-        return {'status': pl.LpStatus[prob.status], 'total_cost': pl.value(prob.objective), 'open_centers': open_ids, 'n_open': len(open_ids), 'assignment': assignment, 'md': md}
+        open_ids = [i for i in all_warehouse_ids if ys[i].value() == 1]
+        assignment = [(i, j) for (i, j) in keys if xs[(i, j)].value() == 1]
+        return {
+            "status": pl.LpStatus[prob.status],
+            "total_cost": pl.value(prob.objective),
+            "open_centers": open_ids,
+            "n_open": len(open_ids),
+            "assignment": assignment,
+            "md": md,
+        }
+    
+
     official_capped_debug = solve_network_debug(use_official_bounds=True)
     print(f"Status: {official_capped_debug['status']}")
     print(f"Cost: €{official_capped_debug['total_cost']:,.0f}")
@@ -1421,6 +1514,31 @@ def _(mo):
 
     Stronger economies of scale are expected to concentrate volume in fewer, larger centers, whereas weaker economies of scale should distribute volume more evenly across facilities. However, since $\alpha$ primarily affects the relative cost advantage between tiers rather than shifting absolute cost levels, its impact on the overall network structure is expected to be less impactful than Parameters changing the entire cost structure.
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(np, pd, plt, solve_network):
+    alphas = np.linspace(0, 1, 21)   
+
+    results_alphas = []
+
+    for ap in alphas:
+        result_alphas = solve_network(alpha=ap)
+        results_alphas.append({
+            "alpha": ap,
+            "total_cost": result_alphas["total_cost"]
+        })
+
+    df_alphas = pd.DataFrame(results_alphas)
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(df_alphas["alpha"], df_alphas["total_cost"], marker="o")
+    plt.xlabel("Alpha")
+    plt.ylabel("Total Cost (€)")
+    plt.title("Total Cost over Alpha")
+    plt.grid(True)
+    plt.show()
     return
 
 
