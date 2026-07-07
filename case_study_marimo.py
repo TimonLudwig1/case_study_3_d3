@@ -115,8 +115,9 @@ def _():
     import matplotlib.cm as cm
     import matplotlib.colors as mcolors
     from IPython.display import display
-    shift_min = 450
+
     #parameters
+    shift_min = 450
     shift_cost_base = 480
     return (
         display,
@@ -157,22 +158,25 @@ def _(display, pd):
     #helper function for data analysis
     from IPython.display import Markdown
 
-    def quick_look(df: pd.DataFrame, name: str, exclude: list[str] | None=None):
+    def quick_look(df: pd.DataFrame, name: str, exclude: list[str] | None = None):
         missing = df.isna().sum()
         missing = missing[missing > 0]
-        meta_md = f'**`{name}`** — {df.shape[0]:,} rows × {df.shape[1]} columns\n\n'
-        meta_md = meta_md + '| column | dtype | missing |\n|---|---|---|\n'
-        meta_md = meta_md + '\n'.join((f'| `{c}` | {df[c].dtype} | {missing.get(c, 0)} |' for c in df.columns))
-        numeric_cols = df.select_dtypes(include='number').columns.tolist()
-        id_like = [c for c in numeric_cols if c.lower().endswith(('id', '_id'))]
+
+        meta_md = f"**`{name}`** — {df.shape[0]:,} rows × {df.shape[1]} columns\n\n"
+        meta_md += "| column | dtype | missing |\n|---|---|---|\n"
+        meta_md += "\n".join(f"| `{c}` | {df[c].dtype} | {missing.get(c, 0)} |" for c in df.columns)
+
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        id_like = [c for c in numeric_cols if c.lower().endswith(("id", "_id"))]
         drop = set(id_like) | set(exclude or [])
         numeric_cols = [c for c in numeric_cols if c not in drop]
+
         display(Markdown(meta_md))
         display(df.head(3))
         if numeric_cols:
             display(df[numeric_cols].describe().round(2))
         else:
-            display(Markdown('_no non-ID numeric columns to describe_'))
+            display(Markdown("_no non-ID numeric columns to describe_"))
 
     return (quick_look,)
 
@@ -281,15 +285,14 @@ def _(mo):
 
 
 @app.cell
-def _(regions, shift_min, shifts, shifts_ref):
+def _(mo, regions, shift_min, shifts, shifts_ref):
     # a link is reachable if 2*travelTime < shift_min (i.e. denominator > 0)
-    #transform the shifts and regions dataframes to usable format for easier analysis
-    #hier gleich alle dfs auf long machen (nacher)
+    # transform the shifts and regions dataframes to usable format for easier analysis
     shifts_long = shifts.reset_index()
     shifts_ref_long = shifts_ref.reset_index()
     regions_flat = regions.reset_index()  # regionID von Index zu normaler Spalte
 
-    is_reachable = 2 * shifts_long["travelTime"] < shift_min 
+    is_reachable = 2 * shifts_long["travelTime"] < shift_min
 
     reach_counts = (
         shifts_long[is_reachable]
@@ -298,9 +301,24 @@ def _(regions, shift_min, shifts, shifts_ref):
     )
 
     n_unreachable_regions = (~regions_flat["regionID"].isin(reach_counts.index)).sum()
+    _stats = reach_counts.describe()
 
-    print(f"Regions with zero reachable centers: {n_unreachable_regions}")
-    reach_counts.describe()
+    mo.md(f"""
+    **Regions with zero reachable centers: {n_unreachable_regions}**
+
+    Reachable centers per region:
+
+    | Statistic | Value |
+    |---|---:|
+    | Count | {_stats['count']:.0f} |
+    | Mean | {_stats['mean']:.1f} |
+    | Std | {_stats['std']:.1f} |
+    | Min | {_stats['min']:.0f} |
+    | 25% | {_stats['25%']:.0f} |
+    | Median (50%) | {_stats['50%']:.0f} |
+    | 75% | {_stats['75%']:.0f} |
+    | Max | {_stats['max']:.0f} |
+    """)
     return is_reachable, regions_flat, shifts_long, shifts_ref_long
 
 
@@ -315,7 +333,7 @@ def _(mo):
 
 
 @app.cell
-def _(is_reachable, shifts_long):
+def _(is_reachable, mo, shifts_long):
     # Nur die als erreichbar geprüften Links behalten wir (siehe Entscheidung oben).
     shifts_reachable = shifts_long[is_reachable].copy()
 
@@ -323,11 +341,11 @@ def _(is_reachable, shifts_long):
     n_kept = len(shifts_reachable)
     n_dropped = n_total - n_kept
 
-    print(f"Total possible center-region links: {n_total:,}")
-    print(f"Reachable (kept):                   {n_kept:,}  ({n_kept/n_total:.1%})")
-    print(f"Unreachable (dropped):               {n_dropped:,}  ({n_dropped/n_total:.1%})")
-
-    shifts_reachable.shape
+    mo.md(f"""
+    - Total possible center–region links: **{n_total:,}**
+    - Reachable (kept): **{n_kept:,}** ({n_kept/n_total:.1%})
+    - Unreachable (dropped): **{n_dropped:,}** ({n_dropped/n_total:.1%})
+    """)
     return (shifts_reachable,)
 
 
@@ -446,9 +464,8 @@ def _(mo):
 
 
 @app.cell
-def _(cost_base, shifts_ref_long):
+def _(cost_base, mo, shifts_ref_long):
     benchmark = shifts_ref_long.copy()
-
     comparison = cost_base.merge(
         benchmark[["warehouseID", "regionID", "transportationCosts"]],
         on=["warehouseID", "regionID"],
@@ -458,13 +475,29 @@ def _(cost_base, shifts_ref_long):
 
     # Sanity check: hat jede unserer reachable rows eine Entsprechung in der Referenz?
     n_missing = comparison["transportationCosts_benchmark"].isna().sum()
-    print(f"Reachable rows without a benchmark match: {n_missing} of {len(comparison):,}")
 
     comparison["rel_diff"] = (
         (comparison["transportationCosts_own"] - comparison["transportationCosts_benchmark"]).abs()
         / comparison["transportationCosts_benchmark"]
     )
-    comparison["rel_diff"].describe()
+    _stats = comparison["rel_diff"].describe()
+
+    mo.md(f"""
+    Reachable rows without a benchmark match: **{n_missing}** of {len(comparison):,}
+
+    Relative difference to benchmark (`rel_diff`):
+
+    | Statistic | Value |
+    |---|---:|
+    | Count | {_stats['count']:.0f} |
+    | Mean | {_stats['mean']:.2e} |
+    | Std | {_stats['std']:.2e} |
+    | Min | {_stats['min']:.2e} |
+    | 25% | {_stats['25%']:.2e} |
+    | Median (50%) | {_stats['50%']:.2e} |
+    | 75% | {_stats['75%']:.2e} |
+    | Max | {_stats['max']:.2e} |
+    """)
     return (comparison,)
 
 
@@ -560,23 +593,36 @@ def _(pd, sorted_costs):
 
 
 @app.cell
-def _(sorted_costs):
-    sorted_costs.iloc[0]        # der Wert an Position 0 = der gemeinsame Tier-1-Wert
-    sorted_costs.iloc[:19].nunique()   # sollte 1 sein, bestätigt "alle 19 identisch"
+def _(mo, sorted_costs):
+    _tier1_value = sorted_costs.iloc[0]
+    _n_unique_in_tier1 = sorted_costs.iloc[:19].nunique()
 
-    print(sorted_costs.iloc[0])
-    print(sorted_costs.iloc[:19].nunique())
+    mo.md(f"""
+    - Fixed cost of the shared Tier 1 value: **€{_tier1_value:,.0f}**
+    - Distinct values among the 19 smallest warehouses: **{_n_unique_in_tier1}** (confirms all 19 share the same fixed cost)
+    """)
     return
 
 
 @app.cell
-def _(warehouses_flat):
-    #check if we considered all warehouses
+def _(mo, warehouses_flat):
     n_unique = warehouses_flat["fixedCosts"].nunique()
     counts = warehouses_flat["fixedCosts"].value_counts().sort_index()
-    print(f"Distinct values: {n_unique}")
-    print(counts)
-    print(f"Sum of counts: {counts.sum()} (should be 42)")
+    _check = "confirmed" if counts.sum() == 42 else "MISMATCH — check for missing/duplicate warehouses"
+
+    _table_rows = "\n".join(
+        f"| €{cost:,.0f} | {n} |" for cost, n in counts.items()
+    )
+
+    mo.md(f"""
+    Distinct fixed-cost values: **{n_unique}**
+
+    | Fixed cost | Number of Warehouses |
+    |---:|---:|
+    {_table_rows}
+
+    Sum of counts: **{counts.sum()}** of 42 total warehouses ({_check})
+    """)
     return
 
 
@@ -584,14 +630,6 @@ def _(warehouses_flat):
 def _(mo):
     mo.md(r"""
     The gap analysis reveals that all 42 warehouses fall into exactly five distinct fixed-cost levels.
-
-    | Tier | Fixed Cost (€) | Number of Warehouses |
-    | ---- | -------------: | --------------------: |
-    | 1    |      1,344,000 |                    19 |
-    | 2    |      2,580,000 |                    15 |
-    | 3    |      4,572,000 |                     6 |
-    | 4    |     15,012,000 |                     1 |
-    | 5    |     35,904,000 |                     1 |
 
     These results provide strong, data-driven support for using five size tiers. While the two largest tiers each contain only a single warehouse, they are retained as separate categories rather than being merged, since their fixed costs (€15.0M and €35.9M) represent clearly distinct capacity levels rather than minor variation around a common value.
 
@@ -628,10 +666,20 @@ def _(mo):
 
 
 @app.cell
-def _():
+def _(mo):
     fixed_by_tier = {"v": 1_344_000, "s": 2_580_000, "m": 4_572_000, "l": 15_012_000, "h": 35_904_000}
     scale_factor = {t: f / fixed_by_tier["v"] for t, f in fixed_by_tier.items()}
-    scale_factor
+
+    _rows = "\n".join(
+        f"| {t} | €{fixed_by_tier[t]:,.0f} | {s:.2f}x |"
+        for t, s in scale_factor.items()
+    )
+
+    mo.md(f"""
+    | Tier | Fixed cost | Scaling factor (relative to "v") |
+    |---|---:|---:|
+    {_rows}
+    """)
     return (scale_factor,)
 
 
@@ -668,21 +716,43 @@ def _(mo):
 
 
 @app.cell
-def _(scale_factor):
-    #dampened scaling factors berechnen
+def _(mo, scale_factor):
     damp_scale_factor = {t: f ** (-0.5) for t, f in scale_factor.items()}
-    damp_scale_factor
+
+    _rows = "\n".join(
+        f"| {t} | {scale_factor[t]:.2f}x | {s:.3f} |"
+        for t, s in damp_scale_factor.items()
+    )
+
+    mo.md(f"""
+    | Tier | Fixed-cost scaling factor | Dampened factor ($s_t^{{-0.5}}$) |
+    |---|---:|---:|
+    {_rows}
+    """)
     return
 
 
 @app.cell
-def _(cost_base, regions_flat):
-    #per delivery transport cost = yearly total transport cost per link / yearly demand of the region
-    #cost_base = df mit den transportkosten pro link
+def _(cost_base, mo, regions_flat):
     merged = cost_base.merge(regions_flat[["regionID", "yearlyDemand"]], on="regionID")
     merged["per_delivery_transport_cost"] = merged["transportationCosts"] / merged["yearlyDemand"]
 
-    merged["per_delivery_transport_cost"].describe()
+    _stats = merged["per_delivery_transport_cost"].describe()
+
+    mo.md(f"""
+    Per-delivery transport cost (`transportationCosts / yearlyDemand`):
+
+    | Statistic | Value |
+    |---|---:|
+    | Count | {_stats['count']:.0f} |
+    | Mean | €{_stats['mean']:.2f} |
+    | Std | €{_stats['std']:.2f} |
+    | Min | €{_stats['min']:.2f} |
+    | 25% | €{_stats['25%']:.2f} |
+    | Median (50%) | €{_stats['50%']:.2f} |
+    | 75% | €{_stats['75%']:.2f} |
+    | Max | €{_stats['max']:.2f} |
+    """)
     return (merged,)
 
 
@@ -699,17 +769,23 @@ def _(mo):
 
 
 @app.cell
-def _(merged, scale_factor):
+def _(merged, mo, scale_factor):
     alpha = 0.5       # dampening exponent
-
     median_transport_per_delivery = merged["per_delivery_transport_cost"].median()
     processing_share = 0.15  # Anteil der Transport-pro-Lieferung-Kosten
-
     c_var_anchor = processing_share * median_transport_per_delivery
-    print(f"c_v^var anchor: {c_var_anchor:.2f} € per delivery")
 
     c_var_by_tier = {t: c_var_anchor / (scale_factor[t] ** alpha) for t in scale_factor}
-    c_var_by_tier
+
+    _rows = "\n".join(f"| {t} | €{c:.2f} |" for t, c in c_var_by_tier.items())
+
+    mo.md(f"""
+    Anchor value $c_v^{{var}}$ (15% of median transport-per-delivery, €{median_transport_per_delivery:.2f}): **€{c_var_anchor:.2f} per delivery**
+
+    | Tier | Variable processing cost $c_t^{{var}}$ |
+    |---|---:|
+    {_rows}
+    """)
     return (
         alpha,
         c_var_by_tier,
@@ -800,7 +876,7 @@ def _(c_var_by_tier, cost_base, regions_flat, warehouses_flat):
 
 
 @app.cell
-def _(model_data, pl, regions_flat, warehouses_flat):
+def _(mo, model_data, pl, regions_flat, warehouses_flat):
     # step 2: pulp problem setup
 
     prob = pl.LpProblem("CashLog_Extended", pl.LpMinimize)
@@ -839,32 +915,46 @@ def _(model_data, pl, regions_flat, warehouses_flat):
     #solve the problem
 
     status = prob.solve(pl.PULP_CBC_CMD(msg=1))
-    print("Status:", pl.LpStatus[status])
-    print("Total cost: €", round(pl.value(prob.objective), 2))
+
+    mo.md(f"""
+    - Solver status: **{pl.LpStatus[status]}**
+    - Total cost: **€{round(pl.value(prob.objective), 2):,.2f}**
+    """)
     return all_warehouse_ids, link_keys, x, y
 
 
 @app.cell
-def _(all_warehouse_ids, display, link_keys, warehouses_flat, x, y):
+def _(all_warehouse_ids, link_keys, mo, warehouses_flat, x, y):
     open_centers = [_i for _i in all_warehouse_ids if y[_i].value() == 1]
     n_open = len(open_centers)
-    print(f'Open centers: {n_open} of 42')
-    print(f'Closed centers: {42 - n_open}')
     assigned_tiers = warehouses_flat.set_index('warehouseID').loc[open_centers, ['city', 'fixedCosts', 'tier']]
-    print(f"Overview of the {assigned_tiers['city'].count()} open centers:")
     assignment = [(_i, _j) for _i, _j in link_keys if x[_i, _j].value() == 1]
-    print(f'Total assignments: {len(assignment)}')
     num_tiers = assigned_tiers['tier'].value_counts().sort_index()
-    display(assigned_tiers.sort_values('fixedCosts'))
-    print(num_tiers)
-    return assignment, open_centers
+
+    _tier_rows = "\n".join(f"| {t} | {n} |" for t, n in num_tiers.items())
+
+    mo.md(f"""
+    - Open centers: **{n_open}** of 42 (closed: **{42 - n_open}**)
+    - Total assignments: **{len(assignment)}**
+
+    Tier breakdown of open centers:
+
+    | Tier | # Open |
+    |---|---:|
+    {_tier_rows}
+    """)
+    return assigned_tiers, assignment, open_centers
+
+
+@app.cell
+def _(assigned_tiers):
+    assigned_tiers.sort_values('fixedCosts')
+    return
 
 
 @app.cell
 def _(
     assignment,
-    display,
-    folium,
     mcolors,
     open_centers,
     pd,
@@ -872,42 +962,96 @@ def _(
     regions_flat,
     warehouses_flat,
 ):
-    # Karte 1: Offene/geschlossene Lager
-    _center_lat = warehouses_flat['lat'].mean()
-    _center_lon = warehouses_flat['lon'].mean()
-    m1 = folium.Map(location=[_center_lat, _center_lon], zoom_start=6, tiles='cartodbpositron')
-    for _row in warehouses_flat.itertuples():
-        is_open = _row.warehouseID in open_centers
-        folium.CircleMarker(location=[_row.lat, _row.lon], radius=9 if is_open else 5, color='#2ca02c' if is_open else '#d62728', fill=True, fill_opacity=0.85, popup=f'{_row.city} (ID {_row.warehouseID})').add_to(m1)
+    map_center_lat = warehouses_flat['lat'].mean()
+    map_center_lon = warehouses_flat['lon'].mean()
+
     assignment_df = pd.DataFrame(assignment, columns=['warehouseID', 'regionID'])
     assignment_df = assignment_df.merge(regions_flat[['regionID', 'lat', 'lon', 'city']], on='regionID')
-    m2 = folium.Map(location=[_center_lat, _center_lon], zoom_start=6, tiles='cartodbpositron')
+
     cmap = plt.cm.get_cmap('tab20', len(open_centers))
     color_by_center = {wid: mcolors.to_hex(cmap(_i)) for _i, wid in enumerate(open_centers)}
-    for _row in assignment_df.itertuples():
-        folium.CircleMarker(location=[_row.lat, _row.lon], radius=2, color=color_by_center.get(_row.warehouseID, '#999999'), fill=True, fill_opacity=0.6).add_to(m2)
-    for _row in warehouses_flat.itertuples():
-        is_open = _row.warehouseID in open_centers
-        folium.CircleMarker(location=[_row.lat, _row.lon], radius=8 if is_open else 5, color=color_by_center.get(_row.warehouseID, '#999999'), fill=True, fill_color=color_by_center.get(_row.warehouseID, '#999999'), fill_opacity=1).add_to(m2)
-    display(m1)
-    # Karte 2: Regionen-Zuordnung
-    # Zuordnung als DataFrame: welche Region gehört zu welchem offenen Center
-    # Lagerstandorte
-    # Regionen
-    display(m2)
-    return (assignment_df,)
+    return assignment_df, color_by_center, map_center_lat, map_center_lon
 
 
 @app.cell
-def _(assignment_df, display, regions_flat):
-    madrid_region_id = regions_flat.loc[regions_flat["city"].str.contains("MADRID", case=False), "regionID"]
-    assignment_df[assignment_df["regionID"].isin(madrid_region_id)]
+def _(
+    folium,
+    map_center_lat,
+    map_center_lon,
+    mo,
+    open_centers,
+    warehouses_flat,
+):
+    m1 = folium.Map(location=[map_center_lat, map_center_lon], zoom_start=6, tiles='cartodbpositron')
+    for _row in warehouses_flat.itertuples():
+        is_open = _row.warehouseID in open_centers
+        folium.CircleMarker(
+            location=[_row.lat, _row.lon],
+            radius=9 if is_open else 5,
+            color='#2ca02c' if is_open else '#d62728',
+            fill=True, fill_opacity=0.85,
+            popup=f'{_row.city} (ID {_row.warehouseID})'
+        ).add_to(m1)
 
-    barcelona_region_id = regions_flat.loc[regions_flat["city"].str.contains("BARCELONA", case=False), "regionID"]
-    assignment_df[assignment_df["regionID"].isin(barcelona_region_id)]
+    mo.vstack([
+        mo.md("### Open vs. Closed Cash Centers"),
+        m1
+    ])
+    return (is_open,)
 
-    display(assignment_df[assignment_df["regionID"].isin(madrid_region_id)])
-    display(assignment_df[assignment_df["regionID"].isin(barcelona_region_id)])
+
+@app.cell
+def _(
+    assignment_df,
+    color_by_center,
+    folium,
+    is_open,
+    map_center_lat,
+    map_center_lon,
+    mo,
+    open_centers,
+    warehouses_flat,
+):
+    m2 = folium.Map(location=[map_center_lat, map_center_lon], zoom_start=6, tiles='cartodbpositron')
+
+    for _row in assignment_df.itertuples():
+        folium.CircleMarker(
+            location=[_row.lat, _row.lon], radius=2,
+            color=color_by_center.get(_row.warehouseID, '#999999'),
+            fill=True, fill_opacity=0.6
+        ).add_to(m2)
+
+    for _row in warehouses_flat.itertuples():
+        is_open_m2 = _row.warehouseID in open_centers
+        folium.CircleMarker(
+            location=[_row.lat, _row.lon],
+            radius=8 if is_open else 5,
+            color=color_by_center.get(_row.warehouseID, '#999999'),
+            fill=True, fill_color=color_by_center.get(_row.warehouseID, '#999999'),
+            fill_opacity=1
+        ).add_to(m2)
+
+    mo.vstack([
+        mo.md("### Region-to-Center Assignment"),
+        m2
+    ])
+    return
+
+
+@app.cell
+def _(assignment_df, mo, regions_flat):
+    _madrid_ids = regions_flat.loc[regions_flat["city"].str.contains("MADRID", case=False), "regionID"]
+    _barcelona_ids = regions_flat.loc[regions_flat["city"].str.contains("BARCELONA", case=False), "regionID"]
+
+    madrid_assignment = assignment_df[assignment_df["regionID"].isin(_madrid_ids)]
+    barcelona_assignment = assignment_df[assignment_df["regionID"].isin(_barcelona_ids)]
+
+    mo.vstack([
+        mo.md("**Madrid's demand is served by:**"),
+        madrid_assignment,
+        mo.md("**Barcelona's demand is served by:**"),
+        barcelona_assignment,
+    ])
     return
 
 
@@ -938,35 +1082,50 @@ def _(mo):
 
 
 @app.cell
-def _(
-    assignment_df,
-    display,
-    open_centers,
-    regions_flat,
-    shifts_long,
-    warehouses_flat,
-):
+def _(assignment_df, mo, open_centers, regions_flat, warehouses_flat):
     volume_per_center = (
         assignment_df.merge(regions_flat[["regionID", "yearlyDemand"]], on="regionID")
         .groupby("warehouseID")["yearlyDemand"]
         .sum()
         .rename("assigned_volume")
     )
-
     volume_check = (
         warehouses_flat.set_index("warehouseID")
         .loc[open_centers, ["city", "tier", "fixedCosts"]]
         .join(volume_per_center)
         .sort_values("tier")
     )
-    display(volume_check)
 
-    tier_volume_stats = volume_check.groupby("tier")["assigned_volume"].describe()
-    display(tier_volume_stats)
-
-    guadalajara_regions = assignment_df[assignment_df["warehouseID"] == 19]
-    display(guadalajara_regions.merge(shifts_long, on=["warehouseID", "regionID"])[["regionID", "travelTime"]].describe())
+    mo.vstack([
+        mo.md("**Assigned volume per open center:**"),
+        volume_check
+    ])
     return (volume_check,)
+
+
+@app.cell
+def _(mo, volume_check):
+    tier_volume_stats = volume_check.groupby("tier")["assigned_volume"].describe()
+
+    mo.vstack([
+        mo.md("**Volume distribution by tier:**"),
+        tier_volume_stats
+    ])
+    return
+
+
+@app.cell
+def _(assignment_df, mo, shifts_long):
+    guadalajara_regions = assignment_df[assignment_df["warehouseID"] == 19]
+    guadalajara_traveltimes = (
+        guadalajara_regions.merge(shifts_long, on=["warehouseID", "regionID"])[["regionID", "travelTime"]]
+    )
+
+    mo.vstack([
+        mo.md("**Guadalajara (WH 19): travel times to assigned regions**"),
+        guadalajara_traveltimes.describe()
+    ])
+    return
 
 
 @app.cell(hide_code=True)
@@ -1088,19 +1247,30 @@ def _(
 
 
 @app.cell
-def _(volume_check):
+def _(mo, volume_check):
     GUADALAJARA_ID = 19
-
     volume_excl_outlier = volume_check.drop(index=GUADALAJARA_ID)  # falls warehouseID der Index ist
     tier_volume_stats_clean = volume_excl_outlier.groupby("tier")["assigned_volume"].describe()
-
     V_ub_by_tier = (tier_volume_stats_clean["75%"] * 1.5).to_dict()
-    # Für Tiers ohne beobachtetes Volumen in der Basislösung (l, h) setzen wir keine cap, da keine Referenzverteilung existiert, aus der sich ein plausibler Cap ableiten ließe.
+
+    # Für Tiers ohne beobachtetes Volumen in der Basislösung (l, h) setzen wir keine cap,
+    # da keine Referenzverteilung existiert, aus der sich ein plausibler Cap ableiten ließe.
     for missing_tier in ["l", "h"]:
         if missing_tier not in V_ub_by_tier:
             V_ub_by_tier[missing_tier] = float("inf")
 
-    V_ub_by_tier
+    _rows = "\n".join(
+        f"| {t} | {'∞ (no reference distribution)' if v == float('inf') else f'{v:,.0f}'} |"
+        for t, v in sorted(V_ub_by_tier.items())
+    )
+
+    mo.md(f"""
+    Volume cap per tier (1.5× the 75th percentile, Guadalajara excluded):
+
+    | Tier | Cap ($V_{{ub}}$) |
+    |---|---:|
+    {_rows}
+    """)
     return (V_ub_by_tier,)
 
 
@@ -1117,6 +1287,7 @@ def _(
     V_ub_by_tier,
     all_warehouse_ids,
     link_keys,
+    mo,
     model_data,
     pl,
     regions_flat,
@@ -1158,21 +1329,27 @@ def _(
 
 
     status_c = prob_capped.solve(pl.PULP_CBC_CMD(msg=0))
-    print("Status:", pl.LpStatus[status_c])
-    print("Total cost: €", round(pl.value(prob_capped.objective), 2))
+
+    mo.md(f"""
+    - Solver status: **{pl.LpStatus[status_c]}**
+    - Total cost: **€{round(pl.value(prob_capped.objective), 2):,.2f}**
+    """)
     return x_c, y_c
 
 
 @app.cell
-def _(all_warehouse_ids, display, warehouses_flat, y_c):
+def _(all_warehouse_ids, mo, warehouses_flat, y_c):
     open_centers_capped = [_i for _i in all_warehouse_ids if y_c[_i].value() == 1]
-    print(f'Open centers: {len(open_centers_capped)} of 42')
-    display(warehouses_flat.set_index('warehouseID').loc[open_centers_capped, ['city', 'tier', 'fixedCosts']].sort_values('tier'))
-    display(warehouses_flat.set_index('warehouseID').loc[open_centers_capped, 'tier'].value_counts())
-    if 19 in open_centers_capped:
-        print('Guadalajara still open')
-    else:
-        print('Guadalajara closed in the capped scenario')
+
+    _capped_overview = warehouses_flat.set_index('warehouseID').loc[open_centers_capped, ['city', 'tier', 'fixedCosts']].sort_values('tier')
+    _tier_counts = warehouses_flat.set_index('warehouseID').loc[open_centers_capped, 'tier'].value_counts()
+    _guadalajara_status = "still open" if 19 in open_centers_capped else "closed in the capped scenario"
+
+    mo.vstack([
+        mo.md(f"**Open centers: {len(open_centers_capped)} of 42** — Guadalajara is **{_guadalajara_status}**."),
+        _capped_overview,
+        _tier_counts,
+    ])
     return (open_centers_capped,)
 
 
@@ -1210,11 +1387,14 @@ def _(mo):
 
 
 @app.cell
-def _(solve_network):
+def _(mo, solve_network):
     official_capped = solve_network(use_official_bounds=True)
-    print(f"Status: {official_capped['status']}")
-    print(f"Cost: €{official_capped['total_cost']:,.0f}")
-    print(f"Open centers: {official_capped['n_open']}")
+
+    mo.md(f"""
+    - Status: **{official_capped['status']}**
+    - Total cost: **€{official_capped['total_cost']:,.0f}**
+    - Open centers: **{official_capped['n_open']}**
+    """)
     return
 
 
@@ -1229,11 +1409,17 @@ def _(mo):
 
 
 @app.cell
-def _(OFFICIAL_V_BOUNDS, all_warehouse_ids, regions_flat, warehouses_flat):
-    #generell mit allen 42 strukturell unmöglich gesamte nachfrage zu bedienen?
-    total_capacity_all_open = sum((OFFICIAL_V_BOUNDS[warehouses_flat.set_index('warehouseID')['tier'][_i]][1] for _i in all_warehouse_ids))
-    print(f'Max capacity if ALL 42 centers were open at their upper bound: {total_capacity_all_open:,.0f}')
-    print(f"Total demand: {regions_flat['yearlyDemand'].sum():,.0f}")
+def _(OFFICIAL_V_BOUNDS, all_warehouse_ids, mo, regions_flat, warehouses_flat):
+    total_capacity_all_open = sum(
+        OFFICIAL_V_BOUNDS[warehouses_flat.set_index('warehouseID')['tier'][_i]][1]
+        for _i in all_warehouse_ids
+    )
+    total_demand = regions_flat['yearlyDemand'].sum()
+
+    mo.md(f"""
+    - Max capacity if all 42 centers were open at their upper bound: **{total_capacity_all_open:,.0f}**
+    - Total annual demand: **{total_demand:,.0f}**
+    """)
     return
 
 
@@ -1256,6 +1442,7 @@ def _(
     alpha,
     demand_by_region,
     median_transport_per_delivery,
+    mo,
     pl,
     processing_share,
     regions_flat,
@@ -1301,7 +1488,9 @@ def _(
         for j in regions_flat["regionID"]:
             reach = [i for (i, jj) in keys if jj == j]
             prob += pl.lpSum(xs[(i, j)] for i in reach) == 1
-        print(md.set_index(["warehouseID", "regionID"]).index.duplicated().sum())
+        # Sanity check used during development to confirm md contains no duplicate
+        # (warehouseID, regionID) pairs, which would silently break the demand aggregation below.
+        # print(md.set_index(["warehouseID", "regionID"]).index.duplicated().sum())
         #falls volumen caps verwendet werden
         if use_official_bounds:
             tier_by_wh = warehouses_flat.set_index("warehouseID")["tier"]
@@ -1333,9 +1522,12 @@ def _(
 
 
     official_capped_debug = solve_network_debug(use_official_bounds=True)
-    print(f"Status: {official_capped_debug['status']}")
-    print(f"Cost: €{official_capped_debug['total_cost']:,.0f}")
-    print(f"Open centers: {official_capped_debug['n_open']}")
+
+    mo.md(f"""
+    - Status: **{official_capped_debug['status']}**
+    - Total cost: **€{official_capped_debug['total_cost']:,.0f}**
+    - Open centers: **{official_capped_debug['n_open']}**
+    """)
     return (solve_network_debug,)
 
 
@@ -1350,7 +1542,7 @@ def _(mo):
 
 
 @app.cell
-def _(OFFICIAL_V_BOUNDS, regions_flat, solve_network_debug):
+def _(OFFICIAL_V_BOUNDS, mo, regions_flat, solve_network_debug):
     result_for_diag = solve_network_debug(use_official_bounds=True)
     md_diag = result_for_diag["md"]
 
@@ -1359,14 +1551,15 @@ def _(OFFICIAL_V_BOUNDS, regions_flat, solve_network_debug):
         .groupby("regionID")["tier_ub"]
         .max()
     )
-
     demand_by_region_series = regions_flat.set_index("regionID")["yearlyDemand"]
-
     impossible_regions = demand_by_region_series[
         demand_by_region_series > region_max_reachable_cap.reindex(demand_by_region_series.index)
     ]
-    print(f"Regions that cannot be assigned to ANY reachable center under official bounds: {len(impossible_regions)}")
-    impossible_regions
+
+    mo.vstack([
+        mo.md(f"**Regions that cannot be assigned to any reachable center under official bounds: {len(impossible_regions)}**"),
+        impossible_regions
+    ])
     return
 
 
@@ -1464,21 +1657,25 @@ def _(pd, solve_network):
 
 
 @app.cell
-def _(alpha_results, display, warehouses_flat):
-    # Welche Center gehen bei alpha=0.5 vs alpha=1.0 verloren?
+def _(alpha_results, mo, warehouses_flat):
     closed_at_high_alpha = set(alpha_results[0.5]["open_centers"]) - set(alpha_results[1.0]["open_centers"])
-    print("Centers open at α=0.5 but closed at α=1.0:", closed_at_high_alpha)
-    display(warehouses_flat.loc[
-        warehouses_flat["warehouseID"].isin(closed_at_high_alpha), 
-        ["warehouseID", "city", "tier", "fixedCosts"]])
-
     opened_at_high_alpha = set(alpha_results[1.0]["open_centers"]) - set(alpha_results[0.5]["open_centers"])
-    print("Centers open at α=1.0 but not at α=0.5:", opened_at_high_alpha)
 
-    warehouses_flat.loc[
+    closed_at_high_alpha_df = warehouses_flat.loc[
+        warehouses_flat["warehouseID"].isin(closed_at_high_alpha),
+        ["warehouseID", "city", "tier", "fixedCosts"]
+    ]
+    opened_at_high_alpha_df = warehouses_flat.loc[
         warehouses_flat["warehouseID"].isin(opened_at_high_alpha),
         ["warehouseID", "city", "tier", "fixedCosts"]
     ]
+
+    mo.vstack([
+        mo.md(f"**Closed at α=1.0 (open at α=0.5), {len(closed_at_high_alpha)} centers:**"),
+        closed_at_high_alpha_df,
+        mo.md(f"**Opened at α=1.0 (not open at α=0.5), {len(opened_at_high_alpha)} centers:**"),
+        opened_at_high_alpha_df,
+    ])
     return
 
 
@@ -1503,35 +1700,40 @@ def _(mo):
 
 
 @app.cell
-def _(alpha_results, display, pd, warehouses_flat):
+def _(alpha_results, mo, pd, warehouses_flat):
     base_assignment = pd.DataFrame(alpha_results[0.5]['assignment'], columns=['warehouseID', 'regionID'])
     a1_assignment = pd.DataFrame(alpha_results[1.0]['assignment'], columns=['warehouseID', 'regionID'])
     merged_1 = base_assignment.merge(a1_assignment, on='regionID', suffixes=('_base', '_a1'))
-    # Zusammenführen: für jede Region, wer bediente sie bei α=0.5, wer bei α=1.0
+
+    # für jede Region, wer bediente sie bei α=0.5, wer bei α=1.0
     changed = merged_1[merged_1['warehouseID_base'] != merged_1['warehouseID_a1']]
     reassignment_summary = changed.groupby(['warehouseID_base', 'warehouseID_a1']).size().rename('n_regions').reset_index()
-    # Nur die Regionen, deren Center sich geändert hat
+
+    # Stadtnamen statt IDs, für Lesbarkeit
     city_lookup = warehouses_flat.set_index('warehouseID')['city']
     reassignment_summary['from_city'] = reassignment_summary['warehouseID_base'].map(city_lookup)
-    # Übersicht: von welchem Center zu welchem Center wie viele Regionen gewandert sind
     reassignment_summary['to_city'] = reassignment_summary['warehouseID_a1'].map(city_lookup)
-    display(reassignment_summary[['from_city', 'to_city', 'n_regions']].sort_values('n_regions', ascending=False))
-    print(f'Total regions with changed assignment: {len(changed)}')
-    # Stadtnamen statt IDs, für Lesbarkeit
-    print(f"Sum of reassignment_summary: {reassignment_summary['n_regions'].sum()}")
+
+    _reassignment_display = reassignment_summary[['from_city', 'to_city', 'n_regions']].sort_values('n_regions', ascending=False)
+    _check = "confirmed" if reassignment_summary['n_regions'].sum() == len(changed) else "MISMATCH"
+
+    mo.vstack([
+        mo.md(f"**Total regions with changed assignment (α=0.5 → α=1.0): {len(changed)}** (sum check: {reassignment_summary['n_regions'].sum()}, {_check})"),
+        _reassignment_display,
+    ])
     return base_assignment, changed
 
 
 @app.cell
-def _(base_assignment, changed):
-    # Wie viele Regionen gehörten den 5 geschlossenen Centern in der Basislösung?
+def _(base_assignment, changed, mo):
     closed_ids = {5, 14, 19, 21, 32}
     regions_from_closed = base_assignment[base_assignment["warehouseID"].isin(closed_ids)]
-    print(f"Regions that belonged to the 5 closed centers: {len(regions_from_closed)}")
-
-    # Wie viele der "changed"-Regionen kamen nicht von einem der 5 geschlossenen Center?
     changed_not_from_closed = changed[~changed["warehouseID_base"].isin(closed_ids)]
-    print(f"Changed regions NOT from a closed center: {len(changed_not_from_closed)}")
+
+    mo.md(f"""
+    - Regions that belonged to the 5 closed centers: **{len(regions_from_closed)}**
+    - Changed regions NOT from a closed center: **{len(changed_not_from_closed)}**
+    """)
     return
 
 
@@ -1577,23 +1779,39 @@ def _(np, pd, plt, solve_network):
 
 
 @app.cell
-def _(display, pd, solve_network, warehouses_flat):
+def _(mo, pd, solve_network, warehouses_flat):
     anchor_results = {share: solve_network(processing_share=share) for share in [0.1, 0.15, 0.25]}
     anchor_df = pd.DataFrame({share: {'cost': r['total_cost'], 'n_open': r['n_open']} for share, r in anchor_results.items()}).T
-    display(anchor_df)
-    for share in [0.1, 0.15, 0.25]:
-        _tiers = warehouses_flat.set_index('warehouseID').loc[anchor_results[share]['open_centers'], 'tier'].value_counts()
-        print(f"processing_share={share}: n_open={anchor_results[share]['n_open']}, tiers={_tiers.to_dict()}")
+
+    _tier_rows = "\n".join(
+        f"| {share:.0%} | {anchor_results[share]['n_open']} | "
+        f"{warehouses_flat.set_index('warehouseID').loc[anchor_results[share]['open_centers'], 'tier'].value_counts().to_dict()} |"
+        for share in [0.1, 0.15, 0.25]
+    )
+
+    mo.vstack([
+        anchor_df,
+        mo.md(f"""
+    | Anchor share | # Open | Tier breakdown |
+    |---|---:|---|
+    {_tier_rows}
+    """),
+    ])
     return (anchor_results,)
 
 
 @app.cell
-def _(anchor_results, warehouses_flat):
+def _(anchor_results, mo, warehouses_flat):
     closed_anchor = set(anchor_results[0.15]["open_centers"]) - set(anchor_results[0.25]["open_centers"])
-    print(f"Closed at anchor_factor={0.25}:", warehouses_flat.set_index("warehouseID").loc[list(closed_anchor), "city"].tolist())
-
     opened_anchor = set(anchor_results[0.25]["open_centers"]) - set(anchor_results[0.15]["open_centers"])
-    print(f"Opened at anchor_factor={0.25}:", warehouses_flat.set_index("warehouseID").loc[list(opened_anchor), "city"].tolist())
+
+    closed_anchor_cities = warehouses_flat.set_index("warehouseID").loc[list(closed_anchor), "city"].tolist()
+    opened_anchor_cities = warehouses_flat.set_index("warehouseID").loc[list(opened_anchor), "city"].tolist()
+
+    mo.md(f"""
+    - Closed at anchor share = 25% ({len(closed_anchor_cities)}): {', '.join(closed_anchor_cities)}
+    - Opened at anchor share = 25% ({len(opened_anchor_cities)}): {', '.join(opened_anchor_cities)}
+    """)
     return
 
 
@@ -1694,14 +1912,26 @@ def _(ax, demand_slider, plt, sweep_df):
 
 
 @app.cell(hide_code=True)
-def _(display, pd, solve_network, warehouses_flat):
+def _(mo, pd, solve_network, warehouses_flat):
     demand_results = {_d: solve_network(demand_factor=_d) for _d in [1.0, 0.9, 0.7, 0.5]}
     demand_red_df = pd.DataFrame({_d: {'cost': r['total_cost'], 'n_open': r['n_open']} for _d, r in demand_results.items()}).T
     demand_red_df['pct_reduction'] = (1 - demand_red_df['cost'] / demand_red_df.loc[1.0, 'cost']) * 100
-    display(demand_red_df)
-    for _d in [1.0, 0.9, 0.7, 0.5]:
-        _tiers = warehouses_flat.set_index('warehouseID').loc[demand_results[_d]['open_centers'], 'tier'].value_counts()
-        print(f"demand_factor={_d}: n_open={demand_results[_d]['n_open']}, tiers={_tiers.to_dict()}")
+
+    _tier_rows = "\n".join(
+        f"| {d:.0%} | {demand_results[d]['n_open']} | "
+        f"{warehouses_flat.set_index('warehouseID').loc[demand_results[d]['open_centers'], 'tier'].value_counts().to_dict()} |"
+        for d in [1.0, 0.9, 0.7, 0.5]
+    )
+
+    mo.vstack([
+        mo.md("**Detailed comparison at the reference reductions (0%, 10%, 30%, 50%):**"),
+        demand_red_df,
+        mo.md(f"""
+    | Demand factor | # Open | Tier breakdown |
+    |---|---:|---|
+    {_tier_rows}
+    """),
+    ])
     return (demand_results,)
 
 
@@ -1718,12 +1948,19 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(demand_results, warehouses_flat):
+def _(demand_results, mo, warehouses_flat):
+    _lines = []
     for _d in [0.7, 0.5]:
         closed = set(demand_results[1.0]['open_centers']) - set(demand_results[_d]['open_centers'])
-        print(f'Closed at demand_factor={_d}:', warehouses_flat.set_index('warehouseID').loc[list(closed), 'city'].tolist())
-        open = set(demand_results[_d]['open_centers']) - set(demand_results[1.0]['open_centers'])
-        print(f'Opened at demand_factor={_d}:', warehouses_flat.set_index('warehouseID').loc[list(open), 'city'].tolist())
+        opened = set(demand_results[_d]['open_centers']) - set(demand_results[1.0]['open_centers'])
+        closed_cities = warehouses_flat.set_index('warehouseID').loc[list(closed), 'city'].tolist()
+        opened_cities = warehouses_flat.set_index('warehouseID').loc[list(opened), 'city'].tolist()
+        _lines.append(
+            f"- **Demand factor = {_d:.0%}:** closed: {', '.join(closed_cities) if closed_cities else '–'}; "
+            f"opened: {', '.join(opened_cities) if opened_cities else '–'}"
+        )
+
+    mo.md("\n".join(_lines))
     return
 
 
@@ -1820,13 +2057,25 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(display, pd, shift_cost_base, solve_network, warehouses_flat):
+def _(mo, pd, shift_cost_base, solve_network, warehouses_flat):
     shiftcost_results = {factor: solve_network(shift_cost=shift_cost_base * factor) for factor in [1.0, 1.2, 1.5]}
     shiftcost_df = pd.DataFrame({factor: {'cost': r['total_cost'], 'n_open': r['n_open']} for factor, r in shiftcost_results.items()}).T
-    display(shiftcost_df)
-    for factor in [1.0, 1.2, 1.5]:
-        _tiers = warehouses_flat.set_index('warehouseID').loc[shiftcost_results[factor]['open_centers'], 'tier'].value_counts()
-        print(f"shift_cost x{factor}: n_open={shiftcost_results[factor]['n_open']}, tiers={_tiers.to_dict()}")
+
+    _tier_rows = "\n".join(
+        f"| x{factor:.1f} | {shiftcost_results[factor]['n_open']} | "
+        f"{warehouses_flat.set_index('warehouseID').loc[shiftcost_results[factor]['open_centers'], 'tier'].value_counts().to_dict()} |"
+        for factor in [1.0, 1.2, 1.5]
+    )
+
+    mo.vstack([
+        mo.md("**Detailed comparison at the reference shift-cost factors (x1.0, x1.2, x1.5):**"),
+        shiftcost_df,
+        mo.md(f"""
+    | Shift-cost factor | # Open | Tier breakdown |
+    |---|---:|---|
+    {_tier_rows}
+    """),
+    ])
     return (shiftcost_results,)
 
 
@@ -1879,23 +2128,33 @@ def _(mo):
 
 
 @app.cell
-def _(
-    display,
-    pd,
-    shift_cost_base,
-    shifts_long,
-    solve_network,
-    warehouses_flat,
-):
-    tech_results = {'base': solve_network(), 'autonomous_no_crew': solve_network(shift_cost=shift_cost_base * 0.4), 'autonomous_full': solve_network(shift_cost=shift_cost_base * 0.4, shift_min=900, travel_factor=0.8)}
+def _(mo, pd, shift_cost_base, shifts_long, solve_network, warehouses_flat):
+    tech_results = {
+        'base': solve_network(),
+        'autonomous_no_crew': solve_network(shift_cost=shift_cost_base * 0.4),
+        'autonomous_full': solve_network(shift_cost=shift_cost_base * 0.4, shift_min=900, travel_factor=0.8),
+    }
     tech_df = pd.DataFrame({name: {'cost': r['total_cost'], 'n_open': r['n_open']} for name, r in tech_results.items()}).T
-    display(tech_df)
+
     usable_full_tech = 900 - 2 * shifts_long['travelTime'] * 0.8
     n_feasible_tech = (usable_full_tech > 0).sum()
-    print(f'Feasible links in autonomous_full scenario: {n_feasible_tech} (vs. 2,661 in the base case)\n')
-    for name, r in tech_results.items():
-        _tiers = warehouses_flat.set_index('warehouseID').loc[r['open_centers'], 'tier'].value_counts()
-        print(f"{name}: n_open={r['n_open']}, tiers={_tiers.to_dict()}")
+
+    _tier_rows = "\n".join(
+        f"| {name} | {r['n_open']} | "
+        f"{warehouses_flat.set_index('warehouseID').loc[r['open_centers'], 'tier'].value_counts().to_dict()} |"
+        for name, r in tech_results.items()
+    )
+
+    mo.vstack([
+        tech_df,
+        mo.md(f"""
+    **Feasible links in the autonomous_full scenario: {n_feasible_tech:,}** (vs. 2,661 in the base case)
+
+    | Scenario | # Open | Tier breakdown |
+    |---|---:|---|
+    {_tier_rows}
+    """),
+    ])
     return (tech_results,)
 
 
@@ -1942,6 +2201,7 @@ def _(mo):
 def _(
     alpha_results,
     anchor_results,
+    mo,
     open_centers_capped,
     pd,
     shiftcost_results,
@@ -1957,7 +2217,11 @@ def _(
         {"scenario": "shiftcost=1.5", "overlap": len(capped_open & shiftcost_15_open),"of_capped": len(capped_open)},
     ])
     overlap_df["pct"] = (overlap_df["overlap"] / overlap_df["of_capped"] * 100).round(1)
-    overlap_df
+
+    mo.vstack([
+        mo.md("### Overlap Check: Capped Model vs. Independent Economic Scenarios"),
+        overlap_df,
+    ])
     return
 
 
@@ -2025,15 +2289,15 @@ def _(
     alpha_results,
     anchor_results,
     demand_results,
+    mo,
     open_centers_capped,
     pd,
     shiftcost_results,
     solve_network,
     warehouses_flat,
 ):
-    # Alle gelösten Szenarien in einem Dict sammeln (nutzt eure bereits gespeicherten Ergebnisse)
     scenarios = {
-        "base":            solve_network(),                                  
+        "base":            solve_network(),
         "alpha_0.3":       alpha_results[0.3],
         "alpha_0.7":       alpha_results[0.7],
         "alpha_1.0":       alpha_results[1.0],
@@ -2049,7 +2313,6 @@ def _(
 
     # Für jedes Center: in wie vielen Szenarien war es offen - wichtig econ und cap trennen
     econ_scenario_names = [n for n in scenarios if n != "capped"]
-
     rows = []
     for wid in all_warehouse_ids:
         open_in = {name: (wid in s["open_centers"]) for name, s in scenarios.items()}
@@ -2067,12 +2330,15 @@ def _(
         .merge(warehouses_flat[["warehouseID", "city", "tier"]], on="warehouseID")
     )
 
-    status_df[["city", "tier", "n_open_econ", "n_total_econ", "in_base", "in_capped"]] #df mit übersicht über alle scenarien
+    mo.vstack([
+        mo.md("###### Full Scenario Overview: Every Center Across All Solved Scenarios"),
+        status_df[["city", "tier", "n_open_econ", "n_total_econ", "in_base", "in_capped"]],
+    ])
     return (status_df,)
 
 
 @app.cell
-def _(status_df):
+def _(mo, status_df):
     def classify(row):
         if row["in_base"]:
             if row["in_capped"]:
@@ -2095,7 +2361,12 @@ def _(status_df):
                 return "Negligible (single scenario, no clear signal)"
 
     status_df["category"] = status_df.apply(classify, axis=1)
-    status_df.sort_values(["category", "n_open_econ"], ascending=[True, False])[["city", "tier", "category", "n_open_econ", "in_base", "in_capped"]]
+    mo.vstack([
+        mo.md("###### Final Classification per Center"),
+        status_df.sort_values(["category", "n_open_econ"], ascending=[True, False])[
+            ["city", "tier", "category", "n_open_econ", "in_base", "in_capped"]
+        ],
+    ])
     return
 
 
@@ -2130,7 +2401,7 @@ def _(mo):
 
 
 @app.cell
-def _(folium, status_df, warehouses_flat):
+def _(folium, mo, status_df, warehouses_flat):
     # Mittelpunkt der Karte
     center_lat = warehouses_flat["lat"].mean()
     center_lon = warehouses_flat["lon"].mean()
@@ -2213,7 +2484,14 @@ def _(folium, status_df, warehouses_flat):
 
     m_final.get_root().html.add_child(folium.Element(legend_html))
 
+
+
     m_final
+
+    mo.vstack([
+        mo.md("### Final Network Classification Map"),
+        m_final,
+    ])
     return
 
 
@@ -2246,7 +2524,7 @@ def _(mo):
 
     Allowing centers to be upgraded to a larger tier would compound the problem further. Such a formulation would require, at minimum: an upgrade-cost factor for every tier-to-tier transition (how much more expensive does a "v" center become when upgraded to "s", "m", and so on), whether these costs are linear or scale non-linearly across jumps, one-time transition or construction costs, and possibly time-phased investment budgets. None of these quantities exist in the dataset. Each would have to be assumed, and the final network would then be driven as much by our invented upgrade economics as by the actual cost data.
 
-    For these reasons, the model is restricted to keep-or-close decisions based on historically observed cost tiers, which are fully grounded in the data. However, this simplification results in solutions that assign unrealistically high volumes to some small facilities, most notably Guadalajara. A separate capacity-constrained comparison model was therefore developed. Originally as a bounded sensitivity check, but then deliberately chosen as a the primary optimization model. Its own capacity threshold is itself an assumption (see the fourth limitation below). It substantially changed the recommended network and ultimately became the basis for the final recommendation. Consequently, the uncapped model should be interpreted with caution, before implementing it as an operational implementation plan, precise volume caps should be established.
+    For these reasons, the model is restricted to keep-or-close decisions based on historically observed cost tiers, which are fully grounded in the data. However, this simplification results in solutions that assign unrealistically high volumes to some small facilities, most notably Guadalajara. A separate capacity-constrained comparison model was therefore developed. Originally as a bounded sensitivity check, but then deliberately chosen as a the primary optimization model. Its own capacity threshold is itself an assumption (see the fourth limitation below). It substantially changed the recommended network and ultimately became the basis for the final recommendation. Consequently, the uncapped model should be interpreted with caution, before implementing it as an operational plan, precise volume caps should be established.
 
     Fourth, the capacity-constrained comparison model itself introduces uncertainty, since its volume limits were derived from the uncapped solution rather than from observed operational capacities. The chosen threshold (1.5 × the 75th percentile, after excluding the identified outlier) serves as a pragmatic calibration rather than a validated engineering limit. While the comparison successfully demonstrates the structural importance of capacity constraints, the exact capacities of individual facilities should be verified before implementation.
 
