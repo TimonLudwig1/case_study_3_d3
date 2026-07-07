@@ -51,71 +51,52 @@ def _(mo):
     mo.md(r"""
     ## 1. Formalizing the Problem
 
-    ### Underlying Trade-off
+    ### The Underlying Trade-off
 
-    We cannot just close the expensive centers, because there is an underlying trade-off that drives our decision problem:
+    Centers cannot simply be closed on the basis of cost alone, since an underlying trade-off governs the decision problem: opening more centers reduces driving time and distance, and thus transport cost, but increases the fixed cost of operating additional Cash Centers. Conversely, opening fewer centers lowers fixed cost but increases transport cost through longer average distances. The cheapest, most stable, and most efficient network therefore lies somewhere between these two extremes, rather than at either boundary.
 
-    If we open more centers, we will lower driving time/distance so we reduce transport cost, but have high fixed costs for running the Cash-Center
-    If we open fewer centers, we have low fixed costs but longer distances, so transport costs increase.
+    ### Why the Network Must Be Optimized as a Whole
 
-    The cheapest, most stable and most optimal network sits somewhere in the middle.
+    Scoring each center individually and closing the worst-performing one is not a valid approach, due to network effects. Whether a given center is worth keeping depends on which other centers remain open: if one center is closed, its regions must be reassigned to other centers, which in turn changes their load and cost parameters. Because regions are interdependent, all centers must be decided upon simultaneously, which requires an optimization model rather than a sequence of local decisions.
 
-    ### Why optimizing the network as a whole matters
+    ### Starting Point: The Warehouse-Location Model
 
-    Scoring each Center individually and closing the worst one is not possible because of network effects. Wether a Center is worth keeping depends on which other centers are open. If one Center is closed, its regions have to be reasssigned to different Centers, which changes their loads and costs parameters.
+    The classic template for a "which facilities should remain open" problem is the warehouse-location model.
 
-    The Regions are interdependent, so we must decide all of them simultaneously by using a optimization model.
-
-    ### Starting point. Warehouse-location model
-
-    The classic template for "which facilities should we keep open" is the Warehouse-Location model.
-
-    **The vocabulary**
+    **Notation**
 
     | Symbol | Meaning |
     |---|---|
-    | $i$ | a Cash Center (one of the 42), the "warehouse" |
-    | $j$ | a customer region (one of the 515) |
-    | $f_i$ | yearly fixed cost of running center $i$ |
+    | $i$ | a Cash Center (one of 42), the "warehouse" |
+    | $j$ | a customer region (one of 515) |
+    | $f_i$ | yearly fixed cost of operating center $i$ |
     | $c_{ij}$ | yearly transport cost of serving region $j$ from center $i$ |
     | $y_i \in \{0,1\}$ | **decision:** is center $i$ open (1) or closed (0)? |
     | $x_{ij} \in \{0,1\}$ | **decision:** is region $j$ served by center $i$? |
 
-    **The model:**
+    **Model formulation:**
 
     $$\min_{x,y}\; \underbrace{\sum_{i}\sum_{j} x_{ij}\,c_{ij}}_{\text{transport cost}}
     \;+\; \underbrace{\sum_{i} f_i\,y_i}_{\text{fixed cost of open centers}}$$
 
     subject to
 
-    $$\sum_{i} x_{ij} = 1 \;\;\forall j \quad\text{(every region served by exactly one center)}$$
-    $$x_{ij} \le y_i \;\;\forall i,j \quad\text{(you may only use a center that is open)}$$
+    $$\sum_{i} x_{ij} = 1 \;\;\forall j \quad\text{(every region is served by exactly one center)}$$
+    $$x_{ij} \le y_i \;\;\forall i,j \quad\text{(a region may only be served by a center that is open)}$$
 
-    This model is our starting point for the logic. But important core assumptions of this model do not apply for CashLog.
+    This model provides the underlying logic for our approach. However, several of its core assumptions do not hold for the CashLog problem.
 
-    #### How the models breaks
+    #### Where the Model Breaks Down
 
-    Three of the models build in assumptions cannot be applied to our CashLog Problem:
+    Three of the model's built-in assumptions cannot be applied directly to the CashLog problem:
 
-    1. $c_{ij}$ has no obvious value
-    The model assumes a known cost-per-link $c_{ij}$ exists. We do not have a "cost to serve region $j$ from center $i$" price tag in the raw data. Trucks
-    serve many customers per 8-hour shift on a route, not one round trip per
-    customer. We must therefore derive $c_{ij}$ from shift logic
+    **1. $c_{ij}$ has no obvious value.** The model assumes a known cost-per-link $c_{ij}$. No such "cost to serve region $j$ from center $i$" figure exists in the raw data: trucks serve many customers per eight-hour shift along a route, rather than making one round trip per customer. $c_{ij}$ must therefore be derived from shift logic.
 
-    2. individual customers is the wrong unit of analysis
-    The model assumes a manageable, fixed set of "customers" $j$. Optimising location
-    choices against 42,000 individual points is computationally unpractical and not how real life routing logic works (Trucks don't make an isolated trip for a single customer). This is why customers need to be processed into cluster regions.
+    **2. Individual customers are the wrong unit of analysis.** The model assumes a manageable, fixed set of customers $j$. Optimizing location choices against roughly 42,000 individual points is computationally impractical and does not reflect how routing works in practice, since trucks do not make isolated trips for single customers. Customers must therefore first be aggregated into cluster regions.
 
-    3. Fixed cost $f_i$ is treated as one constant per center
-    The model assumes each facility has one fixed cost number, independent of how much
-    it processes. At CashLog, capacity is a strategic, investable choice. Centers can be build in different sizes. Cost follows economies of scale. A bigger center costs more in total but less per delivery. A single constant $f_i$ cannot represent that.
+    **3. Fixed cost $f_i$ is treated as a single constant per center.** The model assumes each facility has one fixed-cost figure, independent of the volume it processes. At CashLog, capacity is a strategic, investable choice: centers can be built at different sizes, and costs follow economies of scale, so a larger center costs more in absolute terms but less per delivery. A single constant $f_i$ cannot capture this relationship.
 
-    **Consequence:** points 1 and 2 are pre-processing problems we solve before the
-    model runs (Part 3 and the existing clustering); point 3 is a structural flaw in
-    the objective itself. Fixing it means replacing the single constant $f_i$ with a
-    cost structure that depends on how much volume a center actually handles. We will
-    build that **extended model** later, once we have looked at the data closely
-    enough to calibrate it properly.
+    **Consequence:** points 1 and 2 are pre-processing problems addressed before the model is run (Part 3 and the existing clustering); point 3 is a structural flaw in the objective function itself. Resolving it requires replacing the single constant $f_i$ with a cost structure that depends on the volume a center actually handles. This **extended model** is developed later, once the data has been examined closely enough to calibrate it properly.
     """)
     return
 
@@ -1094,7 +1075,7 @@ def _(
         # 1. variable costs per tier unter den neuen Annahmen
         c_var_anchor_local = processing_share * median_transport_per_delivery   
         c_var = {t: c_var_anchor_local / (scale_factor[t] ** alpha) for t in scale_factor}
-    
+
         # 2. effektive Kosten neu berechnen (Nachfrage-/Schicht-/Fahrzeit-Faktoren einbezogen)
         usable = shift_min - 2 * shifts_long["travelTime"] * travel_factor
         feasible = usable > 0
@@ -1357,7 +1338,7 @@ def _(
         # 1. variable costs per tier unter den neuen Annahmen
         c_var_anchor_local = processing_share * median_transport_per_delivery   
         c_var = {t: c_var_anchor_local / (scale_factor[t] ** alpha) for t in scale_factor}
-    
+
         # 2. effektive Kosten neu berechnen (Nachfrage-/Schicht-/Fahrzeit-Faktoren einbezogen)
         usable = shift_min - 2 * shifts_long["travelTime"] * travel_factor
         feasible = usable > 0
@@ -1415,7 +1396,7 @@ def _(
             "assignment": assignment,
             "md": md,
         }
-    
+
 
     official_capped_debug = solve_network_debug(use_official_bounds=True)
     print(f"Status: {official_capped_debug['status']}")
@@ -1510,7 +1491,7 @@ def _(mo):
     mo.md(r"""
     ### 5.1 a Economies-of-scale strength ($\alpha$)
 
-    The economies-of-scale parameter $\alpha$, scales how strongly variable processing costs decrease with increasing facility size. We test the sensitivity of our results by re-solving the model for alternative values of $\alpha$ [0.3, 0.5, 0.7, 1.0], while keeping all other parameters fixed at their baseline levels.
+    The economies-of-scale parameter $\alpha$, scales how strongly variable processing costs decrease with increasing facility size. We test the sensitivity of our results by re-solving the model across the full range of $\alpha \in [0, 1]$ in steps of 0.05, while keeping all other parameters fixed at their baseline levels. This lets us plot the cost response over the entire range and then look at specific values more concretely. In particular, we examine $\alpha = 0.3$, $\alpha = 0.5$ (our baseline), $\alpha = 0.7$ and $\alpha = 1.0$ in more detail.
 
     Stronger economies of scale are expected to concentrate volume in fewer, larger centers, whereas weaker economies of scale should distribute volume more evenly across facilities. However, since $\alpha$ primarily affects the relative cost advantage between tiers rather than shifting absolute cost levels, its impact on the overall network structure is expected to be less impactful than Parameters changing the entire cost structure.
     """)
@@ -1571,6 +1552,12 @@ def _(alpha_results, display, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    Overall the total cost decreases smoothly and monotonically as α\alpha
+    α increases, falling by only about 3% across the full range from α=0\alpha = 0
+    α=0 to α=1\alpha = 1
+    α=1. This confirms our expectation that α\alpha
+    α has a relatively minor effect on overall cost levels, with no abrupt jumps that would indicate major structural changes in the network
+
     At $\alpha = 1.0$, five small ("v"/"s") cash centers close: Avila, Cordoba, Guadalajara, Huelva, and Orense. At the same time, four larger centers open: Pontevedra, Sevilla, Toledo, and Zamora. From a geographical perspective, this pattern appears consistent with an intuitive redistribution of service areas.
 
     Based on their locations, Sevilla is likely to absorb demand previously served by Huelva and Cordoba, while Toledo may take over the service areas of Avila and Guadalajara. Pontevedra appears to replace Orense in the northwest region. These interpretations are based solely on geographic proximity.
@@ -1638,11 +1625,28 @@ def _(mo):
     mo.md(r"""
     ### 5.1b Processing-cost anchor sensitivity
 
-    Besides $\alpha$, the second free parameter in the derivation of $c_t^{var}$ is the 15% share of median transport cost per delivery used to anchor $c_v^{var}$. To assess the sensitivity of this assumption, the model is re-solved using alternative values of 10% and 25% instead of the baseline 15%, while keeping $\alpha = 0.5$ fixed.
+    Besides $\alpha$, the second free parameter in the derivation of $c_t^{var}$ is the 15% share of median transport cost per delivery used to anchor $c_v^{var}$. To assess the sensitivity of this assumption, the model is re-solved across the full range from 10% to 25% in steps of 1%, while keeping $\alpha = 0.5$ fixed. This lets us plot the cost response over the entire range and then look at the anchor shares of 10%, 15% (our baseline), and 25% more concretely.
 
     Increasing the anchor share raises $c_v^{var}$ proportionally across all tiers, thereby increasing the relative cost of in-house processing compared to transportation. In principle, this should shift the network toward a stronger emphasis on transport cost efficiency. However, since this adjustment affects all tiers uniformly, its impact is expected to be much smaller compared to $\alpha$, which alters the relative cost differences between tiers rather than only shifting the overall cost level.
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _(np, pd, plt, solve_network):
+    shares = np.round(np.arange(0.10, 0.251, 0.01), 3)
+    res_anchor = [{"share": s, "total_cost": solve_network(processing_share=s)["total_cost"]}
+                  for s in shares]
+    df_anchor = pd.DataFrame(res_anchor)
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(df_anchor["share"], df_anchor["total_cost"], marker="o")
+    ax.set_xlabel("Processing-cost anchor share")
+    ax.set_ylabel("Total Cost (€)")
+    ax.set_title("Total Cost over anchor share")
+    ax.grid(True)
+    fig
+    return (ax,)
 
 
 @app.cell
@@ -1669,7 +1673,7 @@ def _(anchor_results, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The processing-cost anchor shows a similarly modest sensitivity compared to $\alpha$. Across the tested range (10% to 25%), which more than covers plausible uncertainty around the baseline value of 15%, total costs vary by approximately -5% to +10%. The tier structure changes only marginally at the upper end of the range.
+    The processing-cost anchor shows a similarly modest sensitivity compared to $\alpha$, across the tested range (10% to 25%), which more than covers plausible uncertainty around the baseline value of 15%. Total cost increases almost linearly with the anchor share and vary by approximately -5% to +10%. The tier structure changes only marginally at the upper end of the range.
 
     Taken together with the results for $\alpha$, this confirms that the derivation of $c_t^{var}$, although based on two explicit modeling assumptions (the anchor share and the economies-of-scale parameter), does not lead to a fragile network recommendation. When varied independently within a reasonable range, neither parameter alters the qualitative conclusion that a network dominated by smaller centers is cost-optimal.
 
@@ -1685,14 +1689,85 @@ def _(mo):
     mo.md(r"""
     ### 5.2 Falling cash demand
 
-    Cash usage has been declining industry-wide as electronic payment methods continue to grow. To capture this trend, we test how the optimal network configuration responds to reductions in annual demand of 10%, 30%, and 50% relative to the current baseline, while keeping the base case parameters.
+    Cash usage has been declining industry-wide as electronic payment methods continue to grow. To capture this trend, we test how the optimal network configuration responds to reductions in annual demand across the full range from 0% to 50% in steps of 5%, while keeping the base case parameters. This lets us plot the network response over the entire range and then look at reductions of 10%, 30%, and 50% more specifically.
 
-    Mathematically, lower demand reduces both transport costs ($c_{ij}$) and variable processing costs ($c_t^{var} \cdot d_j$), whereas fixed facility costs ($f_i$) remain unchanged. As a result, fixed costs become increasingly dominant in the overall cost structure as demand decreases. We therefore expect the model to close more centers concentrating the lesser demand onto fewer facilities, starting with the smallest ("v") tier, since it benefits least from any economies of scale. (sicher?)
+    Mathematically, lower demand reduces both transport costs ($c_{ij}$) and variable processing costs ($c_t^{var} \cdot d_j$), whereas fixed facility costs ($f_i$) remain unchanged. As a result, fixed costs become increasingly dominant in the overall cost structure as demand decreases. We therefore expect the model to close more centers concentrating the lesser demand onto fewer facilities
     """)
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
+def _(mo, np, pd, solve_network):
+    demand_factors = np.round(np.arange(0.5, 1.001, 0.05), 2)  # 0.5 ... 1.0
+    demand_sweep = {float(_d): solve_network(demand_factor=float(_d)) for _d in demand_factors}
+
+    # kompakte Tabelle für Plot/Nachschlagen
+    base_cost = demand_sweep[1.0]["total_cost"]
+    sweep_df = pd.DataFrame({
+        _d: {
+            "n_open": r["n_open"],
+            "total_cost": r["total_cost"],
+            "pct_reduction": (1 - r["total_cost"] / base_cost) * 100,
+        }
+        for _d, r in demand_sweep.items()
+    }).T.sort_index()
+
+    demand_slider = mo.ui.slider(
+        steps=[float(x) for x in demand_factors],
+        value=1.0,
+        label="Demand factor",
+        show_value=True,
+    )
+    demand_slider
+    return demand_slider, demand_sweep, sweep_df
+
+
+@app.cell(hide_code=True)
+def _(demand_slider, demand_sweep, mo, warehouses_flat):
+    _d = demand_slider.value
+    _r = demand_sweep[_d]
+
+    _tiers = (warehouses_flat.set_index("warehouseID")
+              .loc[_r["open_centers"], "tier"].value_counts().to_dict())
+
+    _closed = set(demand_sweep[1.0]["open_centers"]) - set(_r["open_centers"])
+    _closed_cities = warehouses_flat.set_index("warehouseID").loc[list(_closed), "city"].tolist()
+
+    mo.md(f"""
+    **Demand factor = {_d:.2f}**  (reduction: {(1-_d)*100:.0f}%)
+
+    - Open centers: **{_r['n_open']}**
+    - Total cost: **{_r['total_cost']:,.0f} €**
+    - Cost reduction vs. baseline: **{(1 - _r['total_cost']/demand_sweep[1.0]['total_cost'])*100:.1f}%**
+    - Tier breakdown: {_tiers}
+    - Closed vs. baseline ({len(_closed_cities)}): {', '.join(_closed_cities) if _closed_cities else '–'}
+    """)
+
+    return
+
+
+@app.cell(hide_code=True)
+def _(ax, demand_slider, plt, sweep_df):
+    _x = sweep_df.index.to_numpy()            # demand factors
+    _y = sweep_df["n_open"].to_numpy()
+    _sel = demand_slider.value
+
+    fig_, ax_ = plt.subplots(figsize=(7, 4))
+    ax_.step(_x, _y, where="mid", marker="o")
+    ax_.scatter([_sel], [sweep_df.loc[_sel, "n_open"]],
+               s=180, zorder=5, color="C3", label=f"selected ({_sel:.2f})")
+    ax_.set_xlabel("Demand factor")
+    ax_.set_ylabel("# open centers")
+    ax_.set_title("Network size over demand factor")
+    ax_.set_yticks(range(int(_y.min()), int(_y.max()) + 1))  # ganzzahlige Ticks
+    ax_.invert_xaxis()  
+    ax_.grid(True, alpha=0.3)
+    ax.legend()
+    fig_
+    return
+
+
+@app.cell(hide_code=True)
 def _(display, pd, solve_network, warehouses_flat):
     demand_results = {_d: solve_network(demand_factor=_d) for _d in [1.0, 0.9, 0.7, 0.5]}
     demand_red_df = pd.DataFrame({_d: {'cost': r['total_cost'], 'n_open': r['n_open']} for _d, r in demand_results.items()}).T
@@ -1707,7 +1782,7 @@ def _(display, pd, solve_network, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    This expectation holds, with one notable nuance. At a -10% demand reduction, the network remains unchanged, indicating that moderate demand decreases are not sufficient to render any facility unprofitable. The adjustment only takes effect at higher reduction levels: at -30% demand, one "v"-tier center closes, followed by two additional "v"-tier closures at -50%. In all cases, only "v"-tier facilities are affected, while "s" and "m" tiers remain stable across all scenarios. This confirms that the smallest centers are the first to become uneconomical as volume decreases, consistent with the dominance of fixed costs.
+    This expectation holds, with one notable nuance. Up until a -20% demand reduction, the network remains unchanged, indicating that moderate demand decreases are not sufficient to render any facility unprofitable. The adjustment only takes effect at higher reduction levels: at -30% demand, one "v"-tier center closes, followed by two additional "v"-tier closures at -50%. In all cases, only "v"-tier facilities are affected, while "s" and "m" tiers remain stable across all scenarios. This confirms that the smallest centers are the first to become uneconomical as volume decreases, consistent with the dominance of fixed costs.
 
     A second notable finding is that total cost decreases more slowly than demand. A 50% reduction in demand leads to a cost decrease of approximately 36.7% (from €117.1M to €74.1M), rather than a proportional reduction. This deviation is driven by fixed costs, which remain unchanged for all open facilities and therefore dampen the overall cost decline. From a managerial perspective, this implies that the network exhibits a degree of cost rigidity. Even in a severe demand contraction scenario, total costs do not fall proportionally, since a reduced number of facilities can still efficiently absorb the remaining volume.
 
@@ -1716,7 +1791,7 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(demand_results, warehouses_flat):
     for _d in [0.7, 0.5]:
         closed = set(demand_results[1.0]['open_centers']) - set(demand_results[_d]['open_centers'])
@@ -1739,14 +1814,86 @@ def _(mo):
     mo.md(r"""
     ### 5.3 Rising wages and fuel costs
 
-    Labor and fuel costs may increase due to inflation or regulatory changes. To capture this effect, we evaluate scenarios in which shift costs increase by 20% and 50% (from €480 to €576 and €720, respectively), while keeping all other model assumptions at their baseline values.
+    Labor and fuel costs may increase due to inflation or regulatory changes. To capture this effect, we re-solve the model across the full range from +0% to +50% shift-cost increase in steps of 5% (from €480 up to €720), while keeping all other model assumptions at their baseline values. This lets us plot the network response over the entire range and then look at the increases of +20% (€576) and +50% (€720) more concretely.
 
     Shift costs directly affect the transport cost component $c_{ij}$. Higher shift costs increase the cost of every transport link, with a stronger impact on long-distance and thus less efficient assignments. As a result, the model is expected to favor a more decentralized network structure with a higher number of smaller centers, each serving geographically closer regions. This represents the opposite direction of the adjustment observed in the falling-demand scenario, where consolidation becomes optimal.
     """)
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
+def _(mo, np, pd, shift_cost_base, solve_network):
+    shift_factors = np.round(np.arange(1.0, 1.501, 0.05), 2)   # 1.0 ... 1.5
+    shift_sweep = {float(f): solve_network(shift_cost=shift_cost_base * float(f))
+                   for f in shift_factors}
+
+    _base = shift_sweep[1.0]["total_cost"]
+    shift_df = pd.DataFrame({
+        f: {
+            "n_open": r["n_open"],
+            "total_cost": r["total_cost"],
+            "pct_increase": (r["total_cost"] / _base - 1) * 100,
+        }
+        for f, r in shift_sweep.items()
+    }).T.sort_index()
+
+    shift_slider = mo.ui.slider(
+        steps=[float(x) for x in shift_factors],
+        value=1.0,
+        label="Shift-cost factor",
+        show_value=True,
+    )
+    return shift_df, shift_slider, shift_sweep
+
+
+@app.cell(hide_code=True)
+def _(
+    mo,
+    plt,
+    shift_cost_base,
+    shift_df,
+    shift_slider,
+    shift_sweep,
+    warehouses_flat,
+):
+    _f = shift_slider.value
+    _r = shift_sweep[_f]
+
+    _x = shift_df.index.to_numpy()
+    _y = shift_df["n_open"].to_numpy()
+
+    _fig, _ax = plt.subplots(figsize=(7, 4))
+    _ax.step(_x, _y, where="mid", marker="o")
+    _ax.scatter([_f], [shift_df.loc[_f, "n_open"]],
+                s=180, zorder=5, color="C3", label=f"selected (x{_f:.2f})")
+    _ax.set_xlabel("Shift-cost factor")
+    _ax.set_ylabel("# open centers")
+    _ax.set_title("Network size over shift-cost factor")
+    _ax.set_yticks(range(int(_y.min()), int(_y.max()) + 1))
+    _ax.grid(True, alpha=0.3)
+    _ax.legend()
+
+    _tiers = (warehouses_flat.set_index("warehouseID")
+              .loc[_r["open_centers"], "tier"].value_counts().to_dict())
+    _opened = set(_r["open_centers"]) - set(shift_sweep[1.0]["open_centers"])
+    _opened_cities = warehouses_flat.set_index("warehouseID").loc[list(_opened), "city"].tolist()
+
+    mo.vstack([
+        shift_slider,
+        _fig,
+        mo.md(f"""
+    **Shift-cost factor = x{_f:.2f}**  (+{(_f-1)*100:.0f}%, €{shift_cost_base*_f:.0f})
+
+    - Open centers: **{_r['n_open']}**
+    - Total cost: **{_r['total_cost']:,.0f} €** (+{(_r['total_cost']/shift_sweep[1.0]['total_cost']-1)*100:.1f}%)
+    - Tier breakdown: {_tiers}
+    - Newly opened vs. baseline ({len(_opened_cities)}): {', '.join(_opened_cities) if _opened_cities else '–'}
+    """)
+    ])
+    return
+
+
+@app.cell(hide_code=True)
 def _(display, pd, shift_cost_base, solve_network, warehouses_flat):
     shiftcost_results = {factor: solve_network(shift_cost=shift_cost_base * factor) for factor in [1.0, 1.2, 1.5]}
     shiftcost_df = pd.DataFrame({factor: {'cost': r['total_cost'], 'n_open': r['n_open']} for factor, r in shiftcost_results.items()}).T
@@ -1764,7 +1911,7 @@ def _(mo):
 
     This outcome is consistent with the structure of the cost model. Transport costs ($c_{ij}$) and processing costs ($c_t^{var}$) are driven by different mechanisms. Increasing shift costs affects only $c_{ij}$, while leaving the relative processing-cost advantages across tiers unchanged. As transport becomes uniformly more expensive, proximity to demand becomes more important. However, the optimization increasingly favors reallocating demand to already well-positioned larger or medium-sized centers rather than opening additional small facilities. As a result, consolidation into medium tiers dominates over further fragmentation into small centers.
 
-    At intermediate levels (+20%), the network temporarily opens one additional facility before returning to 18 open centers at +50% with a different tier composition. This indicates that while the direction of the effect is consistent, the adjustment in the number of active facilities is not monotonic.
+    At intermediate levels (+10% - 30%), the network temporarily opens one additional facility before returning to 18 open centers at +50% with a different tier composition. This indicates that while the direction of the effect is consistent, the adjustment in the number of active facilities is not monotonic.
 
     To verify that this behavior is not an artifact of the solver, we next inspect the newly opened "m" centers under the +50% shift cost scenario.
     """)
@@ -1866,18 +2013,25 @@ def _(mo):
 
 
 @app.cell
-def _(alpha_results, anchor_results, open_centers_capped, shiftcost_results):
+def _(
+    alpha_results,
+    anchor_results,
+    open_centers_capped,
+    pd,
+    shiftcost_results,
+):
     capped_open = set(open_centers_capped)
     alpha_1_open = set(alpha_results[1.0]["open_centers"])
     anchor_25_open = set(anchor_results[0.25]["open_centers"])
     shiftcost_15_open = set(shiftcost_results[1.5]["open_centers"])
 
-    print("In capped, but not in alpha=1.0:", capped_open - alpha_1_open)   #alle die in der capped Lösung offen sind, aber nicht in alpha=1.0 
-    print("In alpha=1.0, but not in capped:", alpha_1_open - capped_open)   #gespiegelt für alpha
-    print()
-    print("Overlap capped vs alpha=1.0:", len(capped_open & alpha_1_open), "of", len(capped_open), "capped centers are also open in alpha=1.0")  #länge schnittmenge of länge capped 
-    print("Overlap capped vs anchor=0.25:", len(capped_open & anchor_25_open), "of", len(capped_open), "capped centers are also open in anchor=0.25")
-    print("Overlap capped vs shiftcost=1.5:", len(capped_open & shiftcost_15_open), "of", len(capped_open), "capped centers are also open in shiftcost=1.5")
+    overlap_df = pd.DataFrame([
+        {"scenario": "alpha=1.0",     "overlap": len(capped_open & alpha_1_open),     "of_capped": len(capped_open)},
+        {"scenario": "anchor=0.25",   "overlap": len(capped_open & anchor_25_open),   "of_capped": len(capped_open)},
+        {"scenario": "shiftcost=1.5", "overlap": len(capped_open & shiftcost_15_open),"of_capped": len(capped_open)},
+    ])
+    overlap_df["pct"] = (overlap_df["overlap"] / overlap_df["of_capped"] * 100).round(1)
+    overlap_df
     return
 
 
@@ -1914,8 +2068,7 @@ def _(mo):
 
     Unlike Guadalajara, though, this is plausible. Madrid's fixed cost
     (35.9M€) reflects the size class in our tier structure with the highest
-    fixed-cost level, and 826,543 is well within what our capacity check
-    (Section 4) allows for that tier under the percentile-based cap. The
+    fixed-cost level, and 826,543 is well within a plausible volume range for that tier. The
     second-largest, Alicante ("m", 245,965), and the remaining "s"/"v" centers
     all fall within plausible ranges for their respective tiers — the capped
     model does not introduce a new hidden outlier problem.
@@ -2022,25 +2175,27 @@ def _(
 @app.cell
 def _(status_df):
     def classify(row):
-        if _row['in_base']:
-            if _row['n_open_econ'] >= _row['n_total_econ'] - 1:
-                return 'Keep'
-            elif _row['n_open_econ'] <= _row['n_total_econ'] - 3:
-                return 'Reconsider'
+        if row["in_base"]:
+            if row["n_open_econ"] >= row["n_total_econ"] - 1:
+                return "Keep"
+            elif row["n_open_econ"] <= row["n_total_econ"] - 3:
+                return "Reconsider"
             else:
-                return 'Review'
-        elif _row['in_capped'] and _row['n_open_econ'] >= 2:
-            return 'Expansion candidate (capacity + economic — strongest signal)'
-        elif _row['in_capped']:
-            return 'Expansion candidate (capacity-driven)'
-        elif _row['n_open_econ'] >= 2:
-            return 'Expansion candidate (economic stress only)'
-        elif _row['n_open_econ'] == 0:
-            return 'Confirmed closed'
+                return "Review"
         else:
-            return 'Negligible (single scenario, no clear signal)'
-    status_df['category'] = status_df.apply(classify, axis=1)
-    status_df.sort_values(['category', 'n_open_econ'], ascending=[True, False])[['city', 'tier', 'category', 'n_open_econ', 'in_base', 'in_capped']]
+            if row["in_capped"] and row["n_open_econ"] >= 2:
+                return "Expansion candidate (capacity + economic — strongest signal)"
+            elif row["in_capped"]:
+                return "Expansion candidate (capacity-driven)"
+            elif row["n_open_econ"] >= 2:
+                return "Expansion candidate (economic stress only)"
+            elif row["n_open_econ"] == 0:
+                return "Confirmed closed"
+            else:
+                return "Negligible (single scenario, no clear signal)"
+
+    status_df["category"] = status_df.apply(classify, axis=1)
+    status_df.sort_values(["category", "n_open_econ"], ascending=[True, False])[["city", "tier", "category", "n_open_econ", "in_base", "in_capped"]]
     return
 
 
@@ -2077,19 +2232,88 @@ def _(mo):
 @app.cell
 def _(display, folium, status_df, warehouses_flat):
     # Mittelpunkt der Karte
-    _center_lat = warehouses_flat['lat'].mean()
-    _center_lon = warehouses_flat['lon'].mean()
-    m_final = folium.Map(location=[_center_lat, _center_lon], zoom_start=6, tiles='cartodbpositron')
-    category_colors = {'Keep': '#2ca02c', 'Review': '#f1c40f', 'Reconsider': '#ff7f0e', 'Confirmed closed': '#d62728', 'Expansion candidate (capacity + economic — strongest signal)': '#1f77b4', 'Expansion candidate (capacity-driven)': '#17becf', 'Expansion candidate (economic stress only)': '#9467bd', 'Negligible (single scenario, no clear signal)': '#7f7f7f'}
-    plot_df = warehouses_flat.merge(status_df[['city', 'category', 'n_open_econ', 'in_base', 'in_capped']], on='city')
-    for _row in plot_df.itertuples():
-        color = category_colors[_row.category]
-        folium.CircleMarker(location=[_row.lat, _row.lon], radius=9, color=color, fill=True, fill_color=color, fill_opacity=0.9, weight=1.5, popup=f'\n        <b>{_row.city}</b><br>\n        Tier: {_row.tier}<br>\n        Category: {_row.category}<br>\n        Economic scenarios: {_row.n_open_econ}/11<br>\n        Base network: {_row.in_base}<br>\n        Capacity network: {_row.in_capped}\n        ').add_to(m_final)
-    legend_html = '\n<div style="\nposition: fixed;\nbottom: 40px;\nleft: 40px;\nwidth: 330px;\nz-index:9999;\nbackground:white;\npadding:12px;\nborder:2px solid grey;\nfont-size:13px;\n">\n\n<b>Final network classification</b><br><br>\n\n<span style="color:#2ca02c;">&#9679;</span> Keep<br>\n<span style="color:#f1c40f;">&#9679;</span> Review<br>\n<span style="color:#ff7f0e;">&#9679;</span> Reconsider<br>\n<span style="color:#d62728;">&#9679;</span> Confirmed closed<br>\n<span style="color:#1f77b4;">&#9679;</span> Expansion candidate (capacity + economic)<br>\n<span style="color:#17becf;">&#9679;</span> Expansion candidate (capacity-driven)<br>\n<span style="color:#9467bd;">&#9679;</span> Expansion candidate (economic only)<br>\n<span style="color:#7f7f7f;">&#9679;</span> Negligible\n\n</div>\n'
+    center_lat = warehouses_flat["lat"].mean()
+    center_lon = warehouses_flat["lon"].mean()
+
+    m_final = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=6,
+        tiles="cartodbpositron"
+    )
+
     # Farben der finalen Klassifikation
+    category_colors = {
+        "Keep": "#2ca02c",                                         # green
+        "Review": "#f1c40f",                                       # yellow
+        "Reconsider": "#ff7f0e",                                   # orange
+        "Confirmed closed": "#d62728",                             # red
+        "Expansion candidate (capacity + economic — strongest signal)": "#1f77b4",
+        "Expansion candidate (capacity-driven)": "#17becf",
+        "Expansion candidate (economic stress only)": "#9467bd",
+        "Negligible (single scenario, no clear signal)": "#7f7f7f"
+    }
+
+    plot_df = warehouses_flat.merge(
+        status_df[["city","category","n_open_econ","in_base","in_capped"]],
+        on="city"
+    )
+
+    for row in plot_df.itertuples():
+
+        color = category_colors[row.category]
+
+        folium.CircleMarker(
+            location=[row.lat, row.lon],
+            radius=9,
+            color=color,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.9,
+            weight=1.5,
+            popup=f"""
+            <b>{row.city}</b><br>
+            Tier: {row.tier}<br>
+            Category: {row.category}<br>
+            Economic scenarios: {row.n_open_econ}/11<br>
+            Base network: {row.in_base}<br>
+            Capacity network: {row.in_capped}
+            """
+        ).add_to(m_final)
+
+    # Legende # ausklappbar
+    legend_html = """
+    <div style="
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index:9999;
+    background:white;
+    border:2px solid grey;
+    border-radius:6px;
+    font-size:13px;
+    max-width:300px;
+    ">
+    <details>
+    <summary style="padding:8px 12px; cursor:pointer; font-weight:bold;">
+    Final network classification
+    </summary>
+    <div style="padding:0 12px 12px 12px;">
+    <span style="color:#2ca02c;">&#9679;</span> Keep<br>
+    <span style="color:#f1c40f;">&#9679;</span> Review<br>
+    <span style="color:#ff7f0e;">&#9679;</span> Reconsider<br>
+    <span style="color:#d62728;">&#9679;</span> Confirmed closed<br>
+    <span style="color:#1f77b4;">&#9679;</span> Expansion (capacity + economic)<br>
+    <span style="color:#17becf;">&#9679;</span> Expansion (capacity-driven)<br>
+    <span style="color:#9467bd;">&#9679;</span> Expansion (economic only)<br>
+    <span style="color:#7f7f7f;">&#9679;</span> Negligible
+    </div>
+    </details>
+    </div>
+    """
+
     m_final.get_root().html.add_child(folium.Element(legend_html))
-    # Legende
-    display(m_final)  # green  # yellow  # orange  # red
+
+    display(m_final)
     return
 
 
