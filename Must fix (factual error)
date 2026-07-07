@@ -1,0 +1,92 @@
+Must fix (factual error)
+
+1. Wrong row count — 21,360 should be 21,630
+- Line 225: "...for every (center, region) pair, totaling 21,360 rows."
+- Problem: shifts.csv has 21,630 data rows (42 × 515), which I verified against the file. Every other mention (lines 337, 740) already says 21,630. Pure digit transposition.
+- Fix: change 21,360 → 21,630.
+
+Should fix (overstated / loose wording)
+
+2. "almost the entire annual demand" overstates the number
+- Line 1921: Valladolid (1,366,181) + Tarragona (892,083) "would together handle almost the entire annual demand of Spain."
+- Problem: their sum is 2,258,264 of total 2,857,394 = ≈79%, not "almost the entire" (the other two centers carry ~21%).
+- Fix: e.g. "would together handle roughly four-fifths of Spain's annual demand" (or "the bulk of").
+
+3. "Confirmed closed … never appear in any recommended network" vs. Valladolid opening in the tech scenario
+- Line 2114: lists Valladolid among centers that "never appear in any recommended network."
+- Problem: Valladolid does open in the autonomous_full scenario (line 1921). It's defensible because the tech scenarios are excluded from the classification (scenarios dict, lines 2036–2049) and the 4-center solution is explicitly disclaimed — but the absolute phrasing "never appear in any … network" clashes with that on a close read.
+- Fix: qualify it, e.g. "never appear in any recommended network (across the 11 economic scenarios or the capped model)" to make the scope explicit.
+
+Review / judgment call (not necessarily wrong)
+
+4. "Alicante" singled out as third-most-expensive
+- Line 221: "most expensive warehouses located in Madrid, Barcelona, and Alicante."
+- Problem: Madrid (35.9M) and Barcelona (15.0M) are uniquely 1st/2nd, but Alicante ties with 5 other warehouses at 4,572,000. Your head(3) (line 183) does surface Alicante, so it's backed by the code, but naming it alone reads as if it were uniquely third.
+- Decision needed: leave as-is (code-backed) or soften to "…and one of the mid-tier centers such as Alicante."
+
+Optional code cleanliness (no effect on results — your call whether to bother)
+
+- Line 885: plt.cm.get_cmap('tab20', …) — deprecated, breaks on matplotlib ≥3.9.
+- Lines 886–887: color_by_center = {…} assigned twice, identically (delete one).
+- Line 1271: use_upper_only=True parameter is never used in solve_network_debug.
+- Line 1305: leftover debug print(… .index.duplicated().sum()).
+
+What still needs attention in the new text
+
+A. One genuine tension to reconcile (worth fixing).
+Fourth paragraph:
+
+▎ "...developed as a bounded sensitivity check — deliberately kept as a comparison rather than the primary model ... It ... ultimately became the basis for the final recommendation."
+
+This collides with §7 (line ~2134): "We therefore recommend adopting the capacity-constrained network as the primary implementation plan." A reader sees the capped model demoted to "comparison / sensitivity check" here, but elevated to "primary implementation plan" in the recommendation.
+
+It is reconcilable — "primary model" here means the primary optimization/analytical model (uncapped, fully data-grounded), while the capped model is the recommendation. But the words "primary model" vs. "primary implementation plan" are close enough to jar.
+- Fix: disambiguate to "…rather than the primary optimization model…". One word removes the apparent contradiction.
+
+B. Tiny wording nit.
+
+▎ "rendered the model infeasible for a single region"
+
+Imprecise — the whole model is infeasible because of one region, not "for" it.
+- Fix: "…infeasible due to a single region."
+
+That's all on the new paragraph. Everything else in it is fine.
+
+Still-open items from the earlier punch-list (unchanged by this commit)
+
+The quick fix commit only touched the Third-limitation block, so these remain and their line numbers are unchanged (all are above line 2244):
+
+1. Line 225 — 21,360 should be 21,630 (confirmed against data). Hard error, still there.
+2. Line 1921 — "almost the entire annual demand" = actually ~79% (2.26M of 2.86M).
+3. Line 2114 — "Confirmed closed … never appear in any recommended network" vs. Valladolid opening in the autonomous_full tech scenario; scope it to the economic+capped scenarios.
+4. Line 221 — "Alicante" singled out as third-most-expensive while 6 warehouses tie at 4,572,000 (judgment call; code-backed).
+
+What still needs attention in the new text
+
+A. One genuine tension to reconcile (worth fixing).
+Fourth paragraph:
+
+▎ "...developed as a bounded sensitivity check — deliberately kept as a comparison rather than the primary model ... It ... ultimately became the basis for the final recommendation."
+
+This collides with §7 (line ~2134): "We therefore recommend adopting the capacity-constrained network as the primary implementation plan." A reader sees the capped model demoted to "comparison / sensitivity check" here, but elevated to "primary implementation plan" in the recommendation.
+
+It is reconcilable — "primary model" here means the primary optimization/analytical model (uncapped, fully data-grounded), while the capped model is the recommendation. But the words "primary model" vs. "primary implementation plan" are close enough to jar.
+- Fix: disambiguate to "…rather than the primary optimization model…". One word removes the apparent contradiction.
+
+B. Tiny wording nit.
+
+▎ "rendered the model infeasible for a single region"
+
+Imprecise — the whole model is infeasible because of one region, not "for" it.
+- Fix: "…infeasible due to a single region."
+
+That's all on the new paragraph. Everything else in it is fine.
+
+Still-open items from the earlier punch-list (unchanged by this commit)
+
+The quick fix commit only touched the Third-limitation block, so these remain and their line numbers are unchanged (all are above line 2244):
+
+1. Line 225 — 21,360 should be 21,630 (confirmed against data). Hard error, still there.
+2. Line 1921 — "almost the entire annual demand" = actually ~79% (2.26M of 2.86M).
+3. Line 2114 — "Confirmed closed … never appear in any recommended network" vs. Valladolid opening in the autonomous_full tech scenario; scope it to the economic+capped scenarios.
+4. Line 221 — "Alicante" singled out as third-most-expensive while 6 warehouses tie at 4,572,000 (judgment call; code-backed).
