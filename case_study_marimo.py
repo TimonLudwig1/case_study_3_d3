@@ -15,33 +15,32 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # The problem
+    # 1. Problem Definition and Strategic Context
 
-    CashLog is the Spanish market leader in cash logistics. Concretely it does three things:
-    - collect cash from customers
-    - counts, stores and stores it in high-security Cash-Centers
-    - distributes cash back out to different customers
+    ## 1.1 Background and Market Dynamics
+    CashLog operates as the market leader in cash logistics within the Spanish financial sector. The core business model comprises three primary operational pillars:
+    * **Cash Collection:** collecting cash from customers
+    * **Processing and Vaulting:** counting, verification, and high-security storage within dedicated Cash Centers.
+    * **Distribution:** redistribution of physical currency to client networks.
 
-    Historically CashLog ran one Cash Center in every Spanish provincial capital, because the central bank had a branch there. That reason is now gone, and two pressures now push the other way:
+    Historically, CashLog's network architecture followed a decentralized structure, maintaining one Cash Center in every Spanish provincial capital. This geographic distribution was strictly coupled with the local branch network of the Spanish Central Bank. Due to institutional restructuring, this regulatory dependency has ceased to exist, forcing a strategic reallocation of assets. Currently, the efficiency of the network is constrained by two countervailing macroeconomic pressures:
 
-    - Cash is shrinking. Electronic payment keeps replacing physical cash, so the
-      volume each center handles is falling.
-    - Cash Centers are expensive. Security, surveillance and insurance make every
-      single building cost millions of euros per year just to keep open.
+    1. **Secular Decline in Cash Volume:** The accelerating substitution of physical currency by digital and electronic payment systems has led to a structural contraction in total processed volume per facility.
+    2. **High Asset Specificity and Fixed Costs:** Security, surveillance and insurance make every
+      cash center highly expensive just to keep open.
 
-    Today the network is **42 Cash Centers** serving about **42,000 customer
-    locations**. The 42,000 customers have already been grouped into*515 customer regions.
+    ## 1.2 Current Network Topology
+    The current logistics network consists of a set of existing facilities and demand aggregates:
+    * **Facilities:** $M = 42$ active Cash Centers.
+    * **Demand Points:** $N = 42,000$ client locations, structurally aggregated into $K = 515$ distinct customer regions.
 
-    > **The decision:** Out of the 42 existing Cash Centers, which
-    > subset do we **keep open** and which do we **close**, so that the **total yearly
-    > cost is minimal** while **every one of the 515 regions is still served**?
+    ## 1.3 Optimization Objective and Operational Constraints
+    The strategic objective is to formulate a network optimization problem aimed at identifying the optimal subset of Cash Centers to retain. The mathematical objective is to minimize total annualized expenditures while ensuring demand fulfillment.
 
-    **Two hard constraints from the business side:**
+    The optimization model is bound by two deterministic business constraints:
 
-    1. We do not open new locations. We only choose among the 42 that exist.
-
-    2. Every region must remain served. Closing a center is only allowed if its
-       regions can be picked up by other centers.
+    1. **Asset Exclusivity:** The solution space for potential facility locations is strictly bounded by the current network. The opening of new locations is excluded.
+    2. **Guaranteed Service Levels:** Demand fulfillment is non-negotiable. A facility closure is only permissible if the associated regional demand can be completely absorbed by the remaining active network without violating capacity or distance thresholds.
     """)
     return
 
@@ -49,17 +48,17 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 1. Formalizing the Problem
+    # 2. Formalizing the Problem
 
-    ### The Underlying Trade-off
+    ## 2.1 The Underlying Economic Trade-off
 
-    Centers cannot simply be closed on the basis of cost alone, since an underlying trade-off governs the decision problem: opening more centers reduces driving time and distance, and thus transport cost, but increases the fixed cost of operating additional Cash Centers. Conversely, opening fewer centers lowers fixed cost but increases transport cost through longer average distances. The cheapest, most stable, and most efficient network therefore lies somewhere between these two extremes, rather than at either boundary.
+    Centers cannot simply be closed on the basis of cost alone, since an underlying trade-off governs the decision problem. Opening more centers reduces driving time and distance, and thus transport cost, but increases the fixed cost of operating additional Cash Centers. Conversely, opening fewer centers lowers fixed cost but increases transport cost through longer average distances. The cheapest, most stable, and most efficient network therefore lies somewhere between these two extremes, rather than at either boundary.
 
-    ### Why the Network Must Be Optimized as a Whole
+    ## 2.2 Network Interdependencies and Systemic Optimization
 
-    Scoring each center individually and closing the worst-performing one is not a valid approach, due to network effects. Whether a given center is worth keeping depends on which other centers remain open: if one center is closed, its regions must be reassigned to other centers, which in turn changes their load and cost parameters. Because regions are interdependent, all centers must be decided upon simultaneously, which requires an optimization model rather than a sequence of local decisions.
+    Scoring each center individually and closing the worst-performing one is not a valid approach, due to network effects. Whether a given center is worth keeping depends on which other centers remain open. If one center is closed, its regions must be reassigned to other centers, which in turn changes their load and cost parameters. Because regions are interdependent, all centers must be decided upon simultaneously, which requires an optimization model rather than a sequence of local decisions.
 
-    ### Starting Point: The Warehouse-Location Model
+    ## 2.3 Baseline Formulation: The Warehouse-Location Model
 
     The classic template for a "which facilities should remain open" problem is the warehouse-location model.
 
@@ -86,17 +85,17 @@ def _(mo):
 
     This model provides the underlying logic for our approach. However, several of its core assumptions do not hold for the CashLog problem.
 
-    #### Where the Model Breaks Down
+    ### Structural Limitations of the Baseline Model
 
     Three of the model's built-in assumptions cannot be applied directly to the CashLog problem:
 
-    **1. $c_{ij}$ has no obvious value.** The model assumes a known cost-per-link $c_{ij}$. No such "cost to serve region $j$ from center $i$" figure exists in the raw data: trucks serve many customers per eight-hour shift along a route, rather than making one round trip per customer. $c_{ij}$ must therefore be derived from shift logic.
+    **1. $c_{ij}$ has no obvious value.** The model assumes a known cost-per-link $c_{ij}$. No such "cost to serve region $j$ from center $i$" figure exists in the raw data. Trucks serve many customers per eight-hour shift along a route, rather than making one round trip per customer. $c_{ij}$ must therefore be derived from shift logic.
 
     **2. Individual customers are the wrong unit of analysis.** The model assumes a manageable, fixed set of customers $j$. Optimizing location choices against roughly 42,000 individual points is computationally impractical and does not reflect how routing works in practice, since trucks do not make isolated trips for single customers. Customers must therefore first be aggregated into cluster regions.
 
-    **3. Fixed cost $f_i$ is treated as a single constant per center.** The model assumes each facility has one fixed-cost figure, independent of the volume it processes. At CashLog, capacity is a strategic, investable choice: centers can be built at different sizes, and costs follow economies of scale, so a larger center costs more in absolute terms but less per delivery. A single constant $f_i$ cannot capture this relationship.
+    **3. Fixed cost $f_i$ is treated as a single constant per center.** The model assumes each facility has one fixed-cost figure, independent of the volume it processes. At CashLog, capacity is a strategic, investable choice. Centers can be built at different sizes, and costs follow economies of scale, so a larger center costs more in absolute terms but less per delivery. A single constant $f_i$ cannot capture this relationship.
 
-    **Consequence:** points 1 and 2 are pre-processing problems addressed before the model is run (Part 3 and the existing clustering); point 3 is a structural flaw in the objective function itself. Resolving it requires replacing the single constant $f_i$ with a cost structure that depends on the volume a center actually handles. This **extended model** is developed later, once the data has been examined closely enough to calibrate it properly.
+    **Consequence:** points 1 and 2 are pre-processing problems addressed before the model is run. Point 3 is a structural flaw in the objective function itself. Resolving it requires replacing the single constant $f_i$ with a cost structure that depends on the volume a center actually handles. This extended model is developed later, once the data has been examined closely enough to calibrate it properly.
     """)
     return
 
@@ -136,7 +135,7 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2. Data
+    # 3. Data
 
     We load four tables from the course's public GitHub repository.
     """)
@@ -212,20 +211,20 @@ def _(quick_look, shifts_ref):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    We use four diferent datasets:
+    We use four different datasets:
 
-    - warehouses.csv
-    - regions.csv
-    - shifts
-    - shifts_with_costs.csv
+    - `warehouses.csv`
+    - `regions.csv`
+    - `shifts.csv`
+    - `shifts_with_costs.csv`
 
-    The warehouses dataset contains the ciy, location and fixed costs of opening/running each one of the 42 possible warehouses. The fixed costs range from 1.344.000,00 to 35.904.000,00, with the most expensive warehouses located in Madird, Barcelona and Alicante, likely depending on the size and property price level of that certain region.
+    The warehouses dataset contains the city, location, and fixed cost of opening and operating each of the 42 candidate warehouses. Fixed costs range from €1,344,000.00 to €35,904,000.00, with the most expensive warehouses located in Madrid, Barcelona, and Alicante. Likely reflecting the size and property price level of these regions.
 
-    The regions dataset contains informations for each of the 515 clustered demand regions. The dataset has therefore already solved the second major problem of the base model we had to tackle. The regions were clustered by zipCode. For every region each row contains a unique regionID, the name of the city, its location, yearly Demand and average minutesPerStop. Yearly demand ranges from 16,00 to 247.638,00 and minutes per stop take anywhere from 6.20 to 32.12min. The minutesPerStop column also already bundels the driving between customers inside a region with the time spent at each customer. It is therefore a single pre-summerised productivity number.
+    The regions dataset contains information for each of the 515 clustered demand regions, and therefore already addresses the second major limitation of the base model discussed above: customers were pre-aggregated into regions by zip code. For each region, the dataset provides a unique regionID, the city name, its location, yearly demand, and average minutesPerStop. Yearly demand ranges from 16.00 to 247,638.00, and minutesPerStop ranges from 6.20 to 32.12 minutes. The minutesPerStop column already combines the driving time between customers within a region with the time spent at each customer, and therefore represents a single, pre-summarized productivity figure.
 
-    The third shifts dataset contains the travelTime in Minutes and trasportationCosts for every (center, region) pair, totaling 21,360 rows. Transportation costs in this dataset is just a placeholder. It equals the travel time. We will derive sensible and logic proxys for the travel time in the following step.
+    The third dataset, shifts.csv, contains the travel time (in minutes) and transportation cost for every (center, region) pair, totaling 21,360 rows. The transportationCosts column in this dataset is a placeholder equal to the travel time; sensible, logic-based proxies for transportation cost are derived from travel time in the following step.
 
-    The final shifts_with_costs dataset is our reference file with precomputed transportation costs. We will later use this, to validate our own derivation of transportation costs.
+    The final dataset, shifts_with_costs.csv, is our reference file containing precomputed transportation costs. It is used later to validate our own derivation of transportation costs.
     """)
     return
 
@@ -233,41 +232,34 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 3. Estimating the transport cost $c_{ij}$
+    ## 4. Estimating the Transport Cost $c_{ij}$
 
-    Our raw dataset only gives us the driving time as a placeholder for the yearly cost to serve region j from center i. We therefore need to derive an estimate using shift logic the business actually uses:
+    Our raw dataset only provides driving time as a placeholder for the yearly cost of serving region $j$ from center $i$. An estimate must therefore be derived from the shift logic actually used by the business: a truck leaves the center, drives to the region, works, and drives back to the Cash Center.
 
-    A Truck leaves the center, drives to the region, works and drives back to the Cash-Center.
+    **1. Working time per shift.** The round trip consumes $2 \cdot \text{travelTime}_{ij}$ minutes.$^*$ The time available for actually serving customers is therefore:
 
-    1. Working time per shift: The round trip uses $2 \cdot \text{travelTime}_{ij}$ minutes, (aber nur falls traveltime nur von center zu region ist und nicht wieder zurück, ist aber sehr wahrscheinlich) so the time available for actually serving customers is:
+    $$\text{usable time} = \underbrace{450}_{\text{shift length}} - 2\cdot \text{travelTime}_{ij}.$$
 
-    $$\text{usable time} = \underbrace{450}_{\text{shift}} - 2\cdot \text{travelTime}_{ij}.$$
+    This is the time remaining for service after the round trip has been accounted for.
 
-    this is the time we have left to actually do service, after considering the round trip.
-
-    2. Ammount of stops per shift:
-    Each stop takes minutesPerStop (=driving between shops + time spent at the shop):
+    **2. Number of stops per shift.** Each stop takes minutesPerStop (driving between customers plus time spent at each customer). Dividing the usable time by the average time per stop gives the average number of stops per shift:
 
     $$\text{stops per shift} = \frac{450 - 2\,\text{travelTime}_{ij}}{\text{minutesPerStop}_j}.$$
 
-    to calculate the average stops per shift we have to divide the usable time, by the average time per stop.
-
-    3. Ammount of shifts a region requires per year:
-    The region needs yearlyDemand stops in total:
+    **3. Number of shifts a region requires per year.** Each region requires yearlyDemand stops in total. Dividing the yearly stop demand by the number of stops possible in a single shift gives the total number of shifts a region requires per year for all its customers to be served:
 
     $$\text{shifts per year} = \frac{\text{yearlyDemand}_j}{\text{stops per shift}}.$$
 
-    by dividing the yearly stop demand by the ammount of stops possible during a single shift, we can derive the total ammount of shifts an individual region needs per year, for every customer to be served.
+    **4. Deriving the transport cost.** To obtain a feasible value for the yearly transport cost, the number of shifts per year is multiplied by the cost of a single shift:
 
-    4. deriving the transport costs:
-    To get a fesible value for the yearly transportation costs, we simply need to multiply the ammount of shifts per year by the price of an individual shift:
+    $$c_{ij} = 480 \cdot
+    \frac{\text{yearlyDemand}_j \cdot \text{minutesPerStop}_j}{450 - 2\,\text{travelTime}_{ij}}.$$
 
-    $$\; c_{ij} = 480 \cdot
-    \frac{\text{yearlyDemand}_j \cdot \text{minutesPerStop}_j}{\,450 - 2\,\text{travelTime}_{ij}\,} \;$$
+    $^*$ This assumes travelTime$_{ij}$ represents a one-way trip from center to region, requiring the factor of 2 to capture the full round trip; this is the most plausible reading of the raw data, though the dataset does not state it explicitly.
 
-    #### Interpretation:
+    #### Interpretation
 
-    The farther away a region (the bigger the travel time), the smaller the denominater becomes, which increases $c_{ij}$. The more spread-out the customers (the bigger minutesPerStop), the more expensive and lastly, the more demand, the bigger the numerator, the more cost.
+    The farther away a region (the larger the travel time) the smaller the denominator becomes, which increases $c_{ij}$. The more spread out the customers within a region (the larger minutesPerStop) the more expensive it is to serve them. Finally, the larger the demand, the larger the numerator, and thus the higher the cost.
     """)
     return
 
@@ -275,19 +267,15 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Unreachable links
+    ## 4.1 Unreachable Links
 
-    Routes where $2\cdot \text{travelTime}_{ij} \ge 450$ are not possible. Travel time
-    alone would exceed the usable time per shift, and the denominator in our cost
-    formula becomes zero or negative.
+    Routes for which $2\cdot \text{travelTime}_{ij} \ge 450$ are infeasible. Travel time alone would already exceed the usable time per shift, and the denominator in our cost formula becomes zero or negative.
 
-    We have two options for handling these links: drop them entirely (never create
-    an $x_{ij}$ variable for them), or keep them with a Big-M cost large enough that
-    the solver would never choose them.
+    Two options exist for handling such links: dropping them entirely (never creating an $x_{ij}$ variable for them), or retaining them with a Big-M cost large enough that the solver would never select them.
 
-    Dropping is the simpler and more robust option if it is safe to do. It guarantees that the connection is never chosen, since a variable that does not exist cannot be selected. Big-M only achieves the same outcome if $M$ happens to be larger than every alternative the model could otherwise choose. This is a judgment call we would have to justify separately, and one we cannot make yet since we have not solved the model or seen its cost scale.
+    Dropping is the simpler and more robust option, where it is safe to do so. It guarantees that the connection is never chosen, since a variable that does not exist cannot be selected. A Big-M penalty only achieves the same outcome if $M$ happens to be larger than every alternative the model could otherwise choose. A judgment call that would need to be justified separately, and one that cannot yet be made since the model has not been solved and its cost scale is not yet known.
 
-    So our plan is to drop unreachable links, unless doing so would leave some region with no reachable center at all. In that case dropping would make the model infeasible and we would have to fall back to Big-M instead. We check this in the following step.
+    Our approach is therefore to drop unreachable links, unless doing so would leave some region with no reachable center at all. In that case, dropping would render the model infeasible, and we would fall back to a Big-M penalty instead. This condition is checked in the following step.
     """)
     return
 
@@ -319,10 +307,9 @@ def _(regions, shift_min, shifts, shifts_ref):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Decision: drop unreachable links
+    ### Decision: Drop Unreachable Links
 
-    The check confirms every region keeps at least one reachable center (min 1,
-    median 5, max 12 reachable centers per region, out of all 515 regions). Dropping unreachable links does not risk infeasibility. We therefore go with the simpler, more robust option. We drop these links entirely rather than using Big-M.
+    The check confirms that every region retains at least one reachable center (minimum 1, median 5, maximum 12 reachable centers per region, across all 515 regions). Dropping unreachable links therefore does not risk infeasibility, and we adopt the simpler, more robust option. Unreachable links are dropped entirely rather than handled via a Big-M penalty.
     """)
     return
 
@@ -347,12 +334,7 @@ def _(is_reachable, shifts_long):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Dropping unreachable links reduces the model from all 21,630 theoretically
-    possible center–region pairs down to 2,661 actually usable ones. About
-    87.7% of all pairs are removed. This matches what we already saw
-    in the reachability check (median 5 reachable centers per region out of 42). Most
-    centers are simply too far from most regions, so a sparse network is exactly what
-    we would expect geographically, not a sign of a problem.
+    Dropping unreachable links reduces the model from all 21,630 theoretically possible center–region pairs to 2,661 actually usable ones, removing approximately 87.7% of all pairs. This is consistent with the reachability check above (a median of 5 reachable centers per region, out of 42 in total): most centers are simply too far from most regions, so a sparse network is exactly what would be expected geographically, rather than an indication of a problem.
     """)
     return
 
@@ -360,7 +342,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Calculating Transport costs
+    ### 4.2 Calculating Transport costs
 
     We can now calculate every transportation cost for every possible (center, region) tupel
     """)
@@ -426,9 +408,9 @@ def _(plt, sanity, shift_min):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    On the first look, the transportation costs look plausible. Transport cost rises with one-way travel time, and rises steeply as travel time approaches the 225-minute feasibility limit. This matches the shape of our formula, where the denominator shrinks toward zero.
+    At first glance, the transportation costs appear plausible: transport cost rises with one-way travel time, and rises steeply as travel time approaches the 225-minute feasibility limit. This matches the shape of our formula, in which the denominator shrinks toward zero.
 
-    But there is one Irregularity we need to check before proceeding. We can see six (warhouse, region) pairs with a travel time of 0, but the transportation cost varies by a lot. For travel time 0, the denominator is 450 for each of those rows, so differences in costs can only come from variation in yearly demand and/or minutes per stop. Mathematically this is correct, but we still check whether the center is standing in the exact center of the region:
+    One irregularity, however, needs to be checked before proceeding. Six (warehouse, region) pairs have a travel time of 0, yet their transportation costs vary considerably. At a travel time of 0, the denominator equals 450 for each of these rows, so differences in cost can only stem from variation in yearly demand and/or minutesPerStop. Mathematically this is correct, but we nonetheless check whether the center is located at, or very close to, the geographic center of the region:
     """)
     return
 
@@ -448,7 +430,7 @@ def _(regions_flat, sanity, warehouses):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The check confirms this is not a data issue: in every case the warehouse city is either identical to the region's city (e.g. Jaen–JAEN, Soria–SORIA, Toledo–TOLEDO) or a directly neighbouring tow (e.g. Oviedo–Siero, Granada–Ogíjares). These are simply regions whose center is the same city as the cash center, so a travel time of zero is exactly what we would expect. We can therefore conclude that entries with large variations in transportation costs while having similar travel times, are solely driven by variance in yearlyDemand * minutesPerStop
+    The check confirms that this is not a data issue: in every case, the warehouse city is either identical to the region's city (e.g., Jaen–Jaen, Soria–Soria, Toledo–Toledo) or a directly neighbouring town (e.g., Oviedo–Siero, Granada–Ogijares). These are simply regions whose center coincides with the location of the cash center itself, so a travel time of zero is exactly what would be expected. We can therefore conclude that entries with large variations in transportation cost despite similar travel times are driven solely by variance in yearlyDemand $\times$ minutesPerStop.
     """)
     return
 
@@ -456,9 +438,9 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Validating against the benchmark file
+    ### 4.3 Validating Against the Benchmark File
 
-    To check our formula, we compare it against the course's reference file shifts_with_costs.csv. We restrict this comparison to the reachable links only. Those are the only ones our cost formula actually produces and the only ones that feed into the model we solve. The benchmark's unreachable-link placeholder is not something our model uses, so comparing it would not tell us anything about whether our formula is correct.
+    To validate our formula, we compare it against the course's reference file, `shifts_with_costs.csv`. This comparison is restricted to reachable links only, since these are the only links our cost formula actually produces and the only ones that feed into the model to be solved. The benchmark's placeholder values for unreachable links are not used by our model, so including them in the comparison would provide no information about the correctness of our formula.
     """)
     return
 
@@ -507,10 +489,7 @@ def _(comparison, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The relative difference between our formula and the benchmark is effectively zero for all 2,661 reachable links.
-
-    The median, the 25th percentile, and even the minimum are exactly zero. The largest observed difference (approximately $4 \times 10^{-16}$) is extremely small and can reasonably be attributed to rounding errors rather than a meaningful discrepancy. In the scatter plot below, every point falls exactly on the x = y line (shown on a log-log scale). No data point deviates visibly from perfect agreement, consistent with the near-zero relative differences
-    seen in the table. These results show that our derived cost formula reproduces the benchmark values exactly for all practical purposes, providing strong evidence that the derivation is correct rather than merely a close approximation.
+    The relative difference between our formula and the benchmark is effectively zero across all 2,661 reachable links. The median, the 25th percentile, and even the minimum are exactly zero, and the largest observed difference (approximately $4 \times 10^{-16}$) is negligible and can reasonably be attributed to floating-point rounding rather than a meaningful discrepancy. In the scatter plot below, every point falls exactly on the $x = y$ line (shown on a log-log scale); no data point deviates visibly from perfect agreement, consistent with the near-zero relative differences reported above. These results indicate that our derived cost formula reproduces the benchmark values exactly for all practical purposes, providing strong evidence that the derivation is correct rather than merely a close approximation.
     """)
     return
 
@@ -518,28 +497,26 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 4. Extending the model to fix the remaining problem
+    ## 5. Extending the Model to Fix the Remaining Problem
 
-    We identified three reasons why the baseline Warehouse-Location model does not fit CashLog. The first two, an undefined $c_{ij}$ and too many individual customers, are already solved. We derived and validated the cost formula and the customer clustering into 515 regions was already provided in the raw dataset. The third problem remains. The baseline model assumes each center has a
-    fixed capacity and a constant fixed cost, whereas at CashLog capacity is a
-    strategic, investable choice, and cost follows economies of scale.
+    We identified three reasons why the baseline warehouse-location model does not fit the CashLog problem. The first two, an undefined $c_{ij}$ and too large a number of individual customers, have already been resolved. The cost formula was derived and validated in the previous section, and the clustering of customers into 515 regions was already provided in the raw dataset. The third problem remains. The baseline model assumes each center has a fixed capacity and a constant fixed cost, whereas at CashLog capacity is a strategic, investable choice, and cost follows economies of scale.
 
-    We now extend the model directly to address this. Introducing discrete center-size tiers with their own capacity range and cost structure.
+    The model is now extended to address this directly, by introducing discrete center-size tiers, each with its own capacity range and cost structure.
 
-    ### The extended cost function
+    ### 5.1 The Extended Cost Function
 
     Our extended objective combines three cost components:
 
-    $$\min\; \underbrace{\sum_i\sum_j x_{ij}\,c_{ij}}_{\text{transport (already solved)}} \;+\; \underbrace{\sum_i f_i\,y_i}_{\text{real, individual fixed cost}} \;+\; \underbrace{\sum_i\sum_t c_t^{var}\,z_{it}}_{\text{size-dependent processing cost, new}}$$
+    $$\min\; \underbrace{\sum_i\sum_j x_{ij}\,c_{ij}}_{\text{transport (already derived)}} \;+\; \underbrace{\sum_i f_i\,y_i}_{\text{real, center-specific fixed cost}} \;+\; \underbrace{\sum_i\sum_t c_t^{var}\,z_{it}}_{\text{size-dependent processing cost (new)}}$$
 
-    The first term is already fully derived and validated. The second term uses each center's real fixed cost directly from the warehouses dataset. We already have this information for every individual center, so replacing it with a coarser tier average would throw away real data. The third term is new. It captures volume-dependent variable processing cost inside the center, which is not covered by the transport formula and is not constant per delivery due to economies of scale.
+    The first term is already fully derived and validated. The second term uses each center's actual fixed cost directly from the warehouses dataset; since this information is already available for every individual center, replacing it with a coarser tier average would discard real data unnecessarily. The third term is new. It captures the volume-dependent variable processing cost incurred inside the center, which is not covered by the transport formula and, due to economies of scale, is not constant per delivery.
 
-    To make the third term concrete, we need two things we do not yet have:
+    To make the third term concrete, two components are still required:
 
-    1. a classification of each center into a size tier
-    2. a per-tier processing cost $c_t^{var}$ that falls with tier size.
+    1. a classification of each center into a size tier, and
+    2. a per-tier processing cost $c_t^{var}$ that decreases with tier size.
 
-    We derive both from the data below, before writing the full set of decision variables and constraints.
+    Both are derived from the data below, before the full set of decision variables and constraints is specified.
     """)
     return
 
@@ -547,11 +524,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Center Size Tiers
+    ### 5.2 Center Size Tiers
 
-    We start with classification of the cash centers into different size-tiers. The dataset does not contain a direct measure of the center's physical capacity, so we use the fixed cost entry for every warehouse as a proxy for physical warehouse size. The fixed costs of running a warehouse is usually driven by parameters like square footage, electricity costs, salary costs and regional price level. Mostly indicators of physical size.
+    We begin by classifying the cash centers into size tiers. The dataset does not contain a direct measure of each center's physical capacity, so the fixed-cost entry for each warehouse is used as a proxy for physical size. The fixed cost of operating a warehouse is typically driven by factors such as square footage, electricity costs, salary costs, and regional price levels. Largely indicators of physical size.
 
-    The idea is to derive tier boundaries from natural gaps in the fixed-cost distribution. This remains an assumption, as fixed cost correlates with size but is not the same thing, so the resulting tiers are a reasonable approximation, not a precise capacity measurement.
+    The tier boundaries are derived from natural gaps in the fixed-cost distribution. This remains an assumption. Fixed cost correlates with size but is not equivalent to it, so the resulting tiers should be understood as a reasonable approximation rather than a precise capacity measurement.
     """)
     return
 
@@ -609,16 +586,16 @@ def _(mo):
     The gap analysis reveals that all 42 warehouses fall into exactly five distinct fixed-cost levels.
 
     | Tier | Fixed Cost (€) | Number of Warehouses |
-    | ---- | -------------: | -------------------: |
-    | 1    |      1,344,000 |                   19 |
-    | 2    |      2,580,000 |                   15 |
-    | 3    |      4,572,000 |                    6 |
-    | 4    |     15,012,000 |                    1 |
-    | 5    |     35,904,000 |                    1 |
+    | ---- | -------------: | --------------------: |
+    | 1    |      1,344,000 |                    19 |
+    | 2    |      2,580,000 |                    15 |
+    | 3    |      4,572,000 |                     6 |
+    | 4    |     15,012,000 |                     1 |
+    | 5    |     35,904,000 |                     1 |
 
-    These results provide strong, data-driven support for using five size tiers. While the two largest tiers each contain only a single warehouse, we retain them as separate categories rather than merging them. Their fixed costs (€15.0M and €35.9M) represent clearly distinct capacity levels rather than minor variation around a common value.
+    These results provide strong, data-driven support for using five size tiers. While the two largest tiers each contain only a single warehouse, they are retained as separate categories rather than being merged, since their fixed costs (€15.0M and €35.9M) represent clearly distinct capacity levels rather than minor variation around a common value.
 
-    We map each warehouse to its size tier directly via its fixed-cost value, since there are exactly five distinct values, this mapping is exact, not an approximation or a clustering result with ambiguous boundary cases.
+    Each warehouse is mapped to its size tier directly via its fixed-cost value. Since there are exactly five distinct values, this mapping is exact, rather than an approximation or a clustering result with ambiguous boundary cases.
     """)
     return
 
@@ -641,11 +618,11 @@ def _(warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Variable processing costs
+    ### 5.3 Variable Processing Costs
 
-    Having classified each cash center into a size tier, we now derive the variable processing cost per delivery ($c_t^{var}$) for each tier. Rather than guessing five independent values, we scale a single anchor value using the fixed-cost ratios between tiers we already established above. Since fixed cost is our size proxy, a larger tier's fixed-cost ratio also tells us how much bigger it likely is, and economies of scale mean the variable cost per delivery should fall accordingly.
+    Having classified each cash center into a size tier, we now derive the variable processing cost per delivery ($c_t^{var}$) for each tier. Rather than estimating five independent values, a single anchor value is scaled using the fixed-cost ratios between tiers established above. Since fixed cost serves as our size proxy, a larger tier's fixed-cost ratio also indicates how much larger it likely is, and economies of scale imply that variable cost per delivery should fall accordingly.
 
-    Note the unit: $c_t^{var}$ is cost *per individual customer visit*, not per shift or per tour, unlike $c_{ij}$, which already aggregates many visits into a single shift cost.
+    Note the unit: $c_t^{var}$ denotes cost *per individual customer visit*, not per shift or per tour — unlike $c_{ij}$, which already aggregates many visits into a single shift cost.
     """)
     return
 
@@ -661,7 +638,7 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The smallest warehouse tier (v) is used as the reference with a scaling factor of 1.0. The remaining scaling factors are calculated by dividing each tier's fixed cost by the fixed cost of the smallest tier, providing a relative measure across warehouse sizes.
+    The smallest warehouse tier (v) is used as the reference tier, with a scaling factor of 1.0. The scaling factors for the remaining tiers are obtained by dividing each tier's fixed cost by that of the smallest tier, yielding a relative measure of size across all tiers.
     """)
     return
 
@@ -669,25 +646,23 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Dampening the scaling effect
+    ### Dampening the Scaling Effect
 
-    Having derived the fixed-cost ratios between tiers, we now decide how strongly variable cost per delivery should decrease as warehouse size increases. A one-to-one translation of the fixed-cost ratio into variable cost savings would be unrealistically strong. While fixed costs primarily reflect investments in capacity (e.g., warehouse space, equipment, and security infrastructure), operational efficiencies per delivery are subject to physical and organizational limits and therefore cannot improve proportionally with warehouse size. To account for this, we dampen the scaling effect rather than applying the fixed-cost ratios directly, thereby representing economies of scale in a more realistic manner.
+    Having derived the fixed-cost ratios between tiers, we now determine how strongly variable cost per delivery should decrease as warehouse size increases. A one-to-one translation of the fixed-cost ratio into variable cost savings would be unrealistically strong. While fixed costs primarily reflect investments in capacity (e.g., warehouse space, equipment, and security infrastructure), operational efficiencies per delivery are subject to physical and organizational limits and therefore cannot improve proportionally with warehouse size. To account for this, the scaling effect is dampened rather than applying the fixed-cost ratios directly, representing economies of scale in a more realistic manner.
 
-    We implement this using a power function. Let $s_t$ denote the fixed-cost scaling factor of tier $t$ relative to the smallest warehouse tier. The variable processing cost per delivery is then calculated as
+    This is implemented using a power function. Let $s_t$ denote the fixed-cost scaling factor of tier $t$ relative to the smallest warehouse tier. The variable processing cost per delivery is then calculated as
 
     $$c_t^{var} = c_v^{var} \cdot s_t^{-\alpha}$$
 
-    where $c_v^{var}$ is the variable processing cost per delivery of the reference tier and $\alpha$ is the dampening exponent. The parameter $\alpha$ controls the strength of the economies of scale: $\alpha=0$ implies no scaling effect at all, $\alpha=1$ would apply the fixed-cost ratio directly, and intermediate values produce a moderate, more plausible reduction. Since $\alpha$ is the only free parameter of the function and has a clear interpretation, it can be systematically varied in the sensitivity analysis to assess the robustness of the model.
+    where $c_v^{var}$ is the variable processing cost per delivery of the reference tier, and $\alpha$ is the dampening exponent. The parameter $\alpha$ controls the strength of the economies of scale: $\alpha = 0$ implies no scaling effect at all, $\alpha = 1$ applies the fixed-cost ratio directly, and intermediate values produce a more moderate, plausible reduction. Since $\alpha$ is the only free parameter of the function and has a clear interpretation, it can be systematically varied in the sensitivity analysis to assess the robustness of the model.
 
-    We set $\alpha = 0.5$ (square-root dampening) as our base case. It represents a moderate, commonly used degree of scale sensitivity. Strong enough to reflect real economies of scale, but far short of a full 1:1 translation of the fixed-cost ratio. We treat $\alpha$ as an explicit assumption and vary it later in the sensitivity analysis.
+    We set $\alpha = 0.5$ (square-root dampening) as our base case, representing a moderate and commonly used degree of scale sensitivity — strong enough to reflect real economies of scale, but far short of a full 1:1 translation of the fixed-cost ratio. $\alpha$ is treated as an explicit assumption and varied later in the sensitivity analysis.
 
-    ##### Deriving $c_v^{var}$
+    ### Deriving $c_v^{var}$
 
-    The scaled variable processing costs depend on the initital reference $c_v^{var}$. It therefore needs to be a sensible and defensible value. We initialize $c_v^{var}$ using our own transport cost as an internal reference point:
+    The scaled variable processing costs depend on the initial reference value $c_v^{var}$, which must therefore be a sensible and defensible figure. $c_v^{var}$ is initialized using our own transport cost as an internal reference point: for each reachable link, the transport cost per individual delivery ($c_{ij}/\text{yearlyDemand}_j$) can be computed.
 
-    for each reachable link, we can compute the transport cost per individual delivery($c_{ij}/\text{yearlyDemand}_j$).
-
-    In-house processing (counting, sorting) requires no vehicle or fuel, and plausibly less staff time per delivery than a driven tour stop, so we expect it to cost less than transport per delivery. We therefore set $c_v^{var}$ at a sensible fraction of the median transport-per-delivery figure. The percentage itself remains an assumption (we have no data separating processing from transport labor), but the anchor point it scales from is fully derived from our own data, not an external or invented number. We will later consider the impact of that assumption in our sensitivity analysis
+    In-house processing (counting, sorting) requires no vehicle or fuel, and plausibly less staff time per delivery than a driven tour stop, so it is expected to cost less than transport per delivery. $c_v^{var}$ is therefore set at a sensible fraction of the median transport-per-delivery figure. The percentage itself remains an assumption, since no data separates processing labor from transport labor, but the anchor point it scales from is fully derived from our own data rather than an external or invented number. The impact of this assumption is examined later in the sensitivity analysis.
     """)
     return
 
@@ -714,11 +689,11 @@ def _(cost_base, regions_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The median transport cost per delivery across all 2,661 reachable links is 47.12€. We estimate in-house processing costs at roughly **15%** of this transport-per-delivery figure, reasoning that the bulk of a transport stop's cost is driving and logistics overhead rather than the few minutes of actual cash handling. This gives:
+    The median transport cost per delivery across all 2,661 reachable links is €47.12. In-house processing cost is estimated at roughly **15%** of this transport-per-delivery figure, reflecting that the bulk of a transport stop's cost consists of driving and logistics overhead rather than the few minutes of actual cash handling. This gives:
 
-    $$c_v^{var} = 0.15 \times 47.12€ \approx 7.07€ \text{ per delivery}$$
+    $$c_v^{var} = 0.15 \times 47.12\,\text{€} \approx 7.07\,\text{€ per delivery}$$
 
-    We can now calculate the scaled processing costs
+    The scaled processing costs can now be calculated accordingly.
     """)
     return
 
@@ -746,9 +721,9 @@ def _(merged, scale_factor):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The resulting variable processing costs range from 7.07€ per delivery for the smallest tier down to 1.37€ for the largest. A 5.2x reduction, matching $\sqrt{s_h} \approx 5.17$ as expected from $\alpha=0.5$. This is substantially smaller than the 26.7x difference in fixed costs between the same two tiers, confirming that our dampening meaningfully moderates the raw fixed-cost ratio rather than passing it through unchanged. All values remain well below the median transport cost per delivery (47.12€), consistent with in-house processing being cheaper per unit than a driven tour stop.
+    The resulting variable processing costs range from €7.07 per delivery for the smallest tier down to €1.37 for the largest — a 5.17x reduction, matching $\sqrt{s_h} \approx 5.17$ as expected under $\alpha = 0.5$. This is substantially smaller than the 26.7x difference in fixed costs between the same two tiers, confirming that the dampening meaningfully moderates the raw fixed-cost ratio rather than passing it through unchanged. All values remain well below the median transport cost per delivery (€47.12), consistent with in-house processing being cheaper per unit than a driven tour stop.
 
-    We now have every parameter needed to build our extended model
+    All parameters required to build the extended model are now in place.
     """)
     return
 
@@ -940,16 +915,15 @@ def _(assignment_df, display, regions_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The optimal network keeps 18 of 42 centers open, serving all 515 regions. The open set is dominated by small ("v") tiers (13 of 18), with a handful of "s" and one "m" center, but no "l" or "h" centers. This suggests that, under our cost assumptions, the fixed-cost savings of many small centers outweigh the processing-cost efficiencies a few very large centers would offer.
-    No single region's demand concentration is large enough to justify the 15M€+/35M€+ fixed cost, even at their lower per-delivery processing cost.
+    The optimal network keeps 18 of 42 centers open, serving all 515 regions. The open set is dominated by small ("v") tier centers (13 of 18), together with a handful of "s" tier and one "m" tier center, but no "l" or "h" tier centers. This suggests that, under our cost assumptions, the fixed-cost savings of many small centers outweigh the processing-cost efficiencies that a few very large centers would offer. No single region's demand concentration is large enough to justify the €15M+ or €35M+ fixed cost, even at the correspondingly lower per-delivery processing cost.
 
-    The map confirms this is not just a numerical artifact but a geographically sensible outcome. The two most expensive centers (Madrid and Barcelona), are both closed, yet the surrounding demand remains fully covered. Nearby, much cheaper "s" or "v"-tier centers pick up the regions that would otherwise have been served from the metropolis itself.
+    The map confirms that this is not merely a numerical artifact, but a geographically sensible outcome. The two most expensive centers, Madrid and Barcelona, are both closed, yet the surrounding demand remains fully covered: nearby, much cheaper "s" or "v" tier centers absorb the regions that would otherwise have been served from the metropolis itself.
 
-    This is a direct illustration of the network effects we warn about at the beginning. A center's value cannot be judged by whether it is a good location in isolation, but by whether a cheaper combination of other open centers can serve the same demand just as well. Here, the model finds exactly such a combination: Madrid's demand (regions 90 and 244) is served by Warehouse 19 (Guadalajara, tier "v", 1.34M€ fixed cost), and Barcelona's demand (region 438) is served by Warehouse 43 (Tarragona, tier "s", 2.58M€ fixed cost).
+    This is a direct illustration of the network effects discussed at the outset of this report. A center's value cannot be judged by whether it constitutes a good location in isolation, but by whether a cheaper combination of other open centers can serve the same demand equally well. Here, the model identifies exactly such a combination: Madrid's demand (regions 90 and 244) is served by warehouse 19 (Guadalajara, tier "v", €1.34M fixed cost), and Barcelona's demand (region 438) is served by warehouse 43 (Tarragona, tier "s", €2.58M fixed cost).
 
-    Madrid and Barcelona are not "bad locations" in themselves. Opposingly, they sit at the center of Spain's highest-demand areas, but the network as a whole is cheaper without them, because their demand can be absorbed by nearby centers at a fraction of what a facility directly in either metropolis would have cost.
+    Madrid and Barcelona are not "bad locations" in themselves. On the contrary, they sit at the center of Spain's highest-demand areas. Rather, the network as a whole is cheaper without them, because their demand can be absorbed by nearby centers at a fraction of the cost a facility directly in either metropolis would incur.
 
-    This conclusion depends on our economies-of-scale assumption ($\alpha=0.5$). A stronger scaling effect could make large centers more attractive. We test this explicitly in the sensitivity analysis below.
+    This conclusion depends on our economies-of-scale assumption ($\alpha = 0.5$); a stronger scaling effect could make large centers more attractive. This is tested explicitly in the sensitivity analysis below.
     """)
     return
 
@@ -957,12 +931,9 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Checking our no-volume-cap decision
+    #### Checking the No-Volume-Cap Decision
 
-    Before continuing with the Sensitivity Analysis, we have to account for one more potential problem.
-    We earlier chose not to impose explicit volume caps per tier, since we had
-    no real capacity data to set them credibly. We now verify this
-    was safe
+    Before proceeding with the sensitivity analysis, one further potential problem must be addressed. It was earlier decided not to impose explicit volume caps per tier, since no real capacity data was available to set them credibly. This assumption is now verified to ensure it does not compromise the validity of the results.
     """)
     return
 
@@ -1002,19 +973,11 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Warehouse 19 (Guadalajara, tier "v", 1.34M€ fixed cost) is assigned 716,917 units of demand, across 19 regions. Nearly 8x the median volume among "v"-tier centers (91,506) and more than every "s"-tier center and the single "m"-tier center. This is the same location that absorbs Madrid's demand.
+    Warehouse 19 (Guadalajara, tier "v", €1.34M fixed cost) is assigned 716,917 units of demand across 19 regions. Nearly 8x the median volume among "v" tier centers (91,506), and more than every "s" tier center and the single "m" tier center. This is the same location that absorbs Madrid's demand.
 
-    Its travel times to these regions range from 6.6 to 183.2
-    minutes (median 83), comfortably below our 225-minute feasibility limit.
-    So this is not an artifact of barely-reachable links being forced together.
-    Guadalajara is simply very centrally located
-    and can therefore reach many regions efficiently. The geographic logic is
-    sound. The open question is a different one. Whether a facility built at
-    the fixed-cost level of our smallest tier could physically handle this
-    volume in reality.
+    Its travel times to these regions range from 6.6 to 183.2 minutes (median 83), comfortably below the 225-minute feasibility limit, so this is not an artifact of barely-reachable links being forced together. Guadalajara is simply very centrally located and can therefore reach many regions efficiently. The geographic logic is sound; the open question is a different one: whether a facility built at the fixed-cost level of the smallest tier could physically handle this volume in reality.
 
-    This is a direct consequence of not capping volume, and we accept it as a disclosed limitation rather than an error. Without real capacity data, any cap we could impose would itself be an unfounded number. The alternative, trusting an invented cap, would not be more defensible than trusting the model's cost logic here. We flag Guadalajara's assignment as a point CashLog should verify against Guadalajara's actual physical capacity and test the sensitivity of our results to this assumption directly below by re-solving the model with volume caps derived
-    from the observed distribution.
+    This is a direct consequence of not capping volume, and it is accepted here as a disclosed limitation rather than an error. Without real capacity data, any cap that could be imposed would itself be an unfounded number, and trusting such an invented cap would not be more defensible than trusting the model's cost logic in this instance. Guadalajara's assignment is therefore flagged as a point CashLog should verify against the facility's actual physical capacity, and the sensitivity of our results to this assumption is tested directly below by re-solving the model with volume caps derived from the observed distribution.
     """)
     return
 
@@ -1022,26 +985,15 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Comparison: Capacity Check
+    ### 5.4 Comparison: Capacity Check
 
-    As a comparison scenario, we cap each tier's volume at 1.5x its own 75th
-    percentile from the uncapped solution. Not because this is a known real
-    capacity, but to test how much the recommendation changes if no center is
-    allowed to carry a disproportionate share of demand relative to its peers
-    of the same tier.
+    As a comparison scenario, each tier's volume is capped at 1.5x its own 75th percentile from the uncapped solution, not because this represents a known real capacity, but to test how much the recommendation changes if no center is permitted to carry a disproportionate share of demand relative to its peers within the same tier.
 
-    We compute this percentile excluding Guadalajara itself. Including the
-    very outlier we want to constrain would let it inflate the percentile meant
-    to limit it, weakening the cap exactly where it matters most.
+    This percentile is computed excluding Guadalajara itself. Including the very outlier the cap is meant to constrain would let it inflate the percentile designed to limit it, weakening the cap exactly where it matters most.
 
-    Using the raw 75th percentile as a hard cap would still penalize any center
-    simply on the higher end of normal variation within its tier, not just
-    genuine outliers. The 1.5x multiplier is itself a judgment call, chosen to
-    give reasonable headroom for normal variation while still meaningfully
-    constraining extreme cases like Guadalajara (716,917 — still nearly 3.7x
-    even this corrected "v"-tier cap).
+    Using the raw 75th percentile as a hard cap would still penalize any center simply on the higher end of normal variation within its tier, rather than only genuine outliers. The 1.5x multiplier is itself a judgment call, chosen to provide reasonable headroom for normal variation while still meaningfully constraining extreme cases such as Guadalajara (716,917 — still nearly 3.7x even this corrected "v" tier cap).
 
-    From here on, we need to re-solve variations of this model repeatedly. For capacity checks now and for the sensitvity analysis later. Rather than duplicating the PuLP setup each time, we wrap it into a function, using the same objective, constraints, and logic as the base model above, with adjustable parameters we will use throughout the rest of this notebook.
+    From this point on, models must be re-solved repeatedly, both for the capacity checks here and for the sensitivity analysis that follows. Rather than duplicating the PuLP setup each time, it is wrapped into a function using the same objective, constraints, and logic as the base model above, with adjustable parameters used throughout the remainder of this notebook.
     """)
     return
 
@@ -1156,7 +1108,7 @@ def _(volume_check):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Note: the "m" tier's cap is based on a single observed center (Alicante), so its 75th percentile is simply that center's own volume. Less robust than the "v"/"s" caps, which are based on more centers respectively. We proceed with it as a reasonable approximation, since Alicante's own assigned volume is well within this self-referential cap by construction.
+    Note: the "m" tier's cap is based on a single observed center (Alicante), so its 75th percentile is simply that center's own volume . A less robust basis than the "v" and "s" tier caps, which are each derived from a larger number of centers. This is nonetheless treated as a reasonable approximation, since Alicante's assigned volume is, by construction, well within this self-referential cap.
     """)
     return
 
@@ -1228,24 +1180,9 @@ def _(all_warehouse_ids, display, warehouses_flat, y_c):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The capped comparison confirms that Guadalajara's role in the base solution
-    was not incidental. When no center may exceed the 1.5x-buffered, outlier-
-    excluded volume typical for its tier, the network changes in a very
-    specific way, Guadalajara (previously absorbing 716,917 units, including
-    Madrid's demand) closes, and Madrid itself reopens. This time as an "h"-
-    tier facility. The model effectively substitutes one
-    large, expensive hub for another, rather than spreading Madrid's demand
-    thinly across several small centers. This tells us Madrid's surrounding
-    demand is large enough to require either (a) a genuinely large facility, or
-    (b) an artificially overloaded small one. A "normal-sized" small center
-    cannot absorb it.
+    The capped comparison confirms that Guadalajara's role in the base solution was not incidental. When no center may exceed the 1.5x-buffered, outlier-excluded volume typical for its tier, the network changes in a very specific way: Guadalajara, which previously absorbed 716,917 units including Madrid's demand, closes, and Madrid itself reopens. This time as an "h" tier facility. The model effectively substitutes one large, expensive hub for another, rather than spreading Madrid's demand thinly across several small centers. This indicates that the demand surrounding Madrid is large enough to require either (a) a genuinely large facility, or (b) an artificially overloaded small one; a "normal-sized" small center cannot absorb it.
 
-    The network also shifts from mostly "v"-tier (13 of 18) to a more balanced
-    mix (11 "v", 6 "s", one "m", one "h"), with one more center open overall
-    (19 vs. 18). Total cost rises by 25.4% (+€29.7M). A substantial amount,
-    confirming that a meaningful share of the base solution's efficiency came
-    specifically from allowing Guadalajara to operate far outside its tier's
-    typical volume range.
+    The network also shifts from a predominantly "v" tier composition (13 of 18) to a more balanced mix (11 "v", 6 "s", one "m", one "h"), with one additional center open overall (19 vs. 18). Total cost rises by 25.4% (+€29.7M) — a substantial increase, confirming that a meaningful share of the base solution's efficiency stemmed specifically from allowing Guadalajara to operate far outside its tier's typical volume range.
 
     | Metric | Uncapped (base) | Capped |
     |---|---:|---:|
@@ -1253,12 +1190,12 @@ def _(mo):
     | Cost difference | — | +€29,720,806 (+25.4%) |
     | Open centers | 18 | 19 |
     | Tier mix (v / s / m / l / h) | 13 / 4 / 1 / 0 / 0 | 11 / 6 / 1 / 0 / 1 |
-    | Guadalajara (WH 19) | open  | closed |
+    | Guadalajara (WH 19) | open | closed |
     | Madrid (WH 28) | closed | open (h-tier) |
 
-    The unconstrained solution represents the cost minimizing network under the assumptions of the optimization model. However, it assigns a shipment volume to Guadalajara that may not be physically realistic for that facility, raising questions about whether this volume would be operationally feasible.
+    The unconstrained solution represents the cost-minimizing network under the assumptions of the optimization model. However, it assigns a volume to Guadalajara that may not be physically realistic for that facility, raising the question of whether this allocation would be operationally feasible in practice.
 
-    To assess the robustness of this result, a second sanity check is performed using the volume capacity limits provided in the course notebook.
+    To further assess the robustness of this result, a second sanity check is performed using the volume capacity limits provided in the course notebook.
     """)
     return
 
@@ -1266,11 +1203,9 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### A second capacity check: the course's official volume bounds
+    ### 5.5 A Second Capacity Check: The Course's Official Volume Bounds
 
-    As an additional, independently-sourced comparison, the course's own
-    extended-model template (`advancedAnalysis.py`) specifies concrete volume
-    bounds per tier. We re-solve using these official bounds, in addition to our own percentile-based cap above.
+    As an additional, independently sourced comparison, the course's own extended-model template (`advancedAnalysis.py`) specifies concrete volume bounds per tier. The model is re-solved using these official bounds, alongside the percentile-based cap derived above.
     """)
     return
 
@@ -1287,9 +1222,9 @@ def _(solve_network):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Under these capacity constraints, the model becomes infeasible, indicating that no network configuration can simultaneously satisfy all customer demand while respecting the prescribed facility capacity limits. To better understand this result, we examine the potential causes of the infeasibility.
+    Under these capacity constraints, the model becomes infeasible, indicating that no network configuration can simultaneously satisfy all customer demand while respecting the prescribed facility capacity limits. To better understand this result, the potential causes of the infeasibility are examined.
 
-    We first examine whether the specified volume limits are overly restrictive in general. To do so, we compare the maximum throughput that could be achieved if all 42 candidate distribution centers were opened and operated at their respective upper capacity bounds with the total annual customer demand.
+    The first question is whether the specified volume limits are overly restrictive in general. To assess this, the maximum throughput that could be achieved if all 42 candidate distribution centers were opened and operated at their respective upper capacity bounds is compared against total annual customer demand.
     """)
     return
 
@@ -1306,11 +1241,11 @@ def _(OFFICIAL_V_BOUNDS, all_warehouse_ids, regions_flat, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The combined maximum capacity of all potential facilities amounts to approximately 101.9 million units, whereas the total annual demand is only about 2.9 million units. This confirms that the capacity limits are not restrictive at the network level. Therefore, the infeasibility must arise from the interaction between the capacity constraints and other model restrictions rather than from insufficient total capacity.
+    The combined maximum capacity of all potential facilities amounts to approximately 101.9 million units, whereas total annual demand is only about 2.9 million units. This confirms that the capacity limits are not restrictive at the network level; the infeasibility must therefore arise from the interaction between the capacity constraints and other model restrictions, rather than from insufficient total capacity.
 
-    A more likely explanation is the interaction between the upper capacity limits and the assignment constraints. In particular, a single region whose annual demand exceeds the capacity of every reachable cash center would make the model infeasible, even if substantial unused capacity remained elsewhere in the network.
+    A more likely explanation is the interaction between the upper capacity limits and the assignment constraints. In particular, a single region whose annual demand exceeds the capacity of every reachable cash center would render the model infeasible, even if substantial unused capacity remained elsewhere in the network.
 
-    To investigate whether the lower volume bounds contribute to this behavior, the model is solved again after temporarily removing the minimum volume constraints for the selected cash centers. This allows us to isolate the effect of the upper capacity limits and determine whether the lower bounds are responsible for the infeasibility.
+    To investigate whether the lower volume bounds contribute to this behavior, the model is solved again after temporarily removing the minimum volume constraints for the selected cash centers. This isolates the effect of the upper capacity limits and clarifies whether the lower bounds are responsible for the infeasibility.
     """)
     return
 
@@ -1408,9 +1343,9 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    After removing the minimum volume constraints, the optimization model remains infeasible. This indicates that the lower capacity bounds are not responsible for the infeasibility. Instead, the conflicting constraints must originate elsewhere in the model.
+    After removing the minimum volume constraints, the optimization model remains infeasible. This indicates that the lower capacity bounds are not responsible for the infeasibility, and the conflicting constraints must therefore originate elsewhere in the model.
 
-    The next step is to examine whether any individual region cannot be assigned to a feasible cash center under the official capacity limits. For each region, the maximum capacity of all reachable cash centers is compared with the region's annual demand.
+    The next step is to examine whether any individual region cannot be assigned to a feasible cash center under the official capacity limits. For each region, the maximum capacity of all reachable cash centers is compared against the region's annual demand.
     """)
     return
 
@@ -1439,7 +1374,7 @@ def _(OFFICIAL_V_BOUNDS, regions_flat, solve_network_debug):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    This analysis identifies exactly one problematic region. Region 410 has an annual demand of 59,646 units, which exceeds the capacity of every cash center that can serve it. Consequently, no feasible assignment exists for this region, regardless of the available capacity elsewhere in the network. This explains the infeasibility observed in the optimization model and confirms that it is caused by a local capacity bottleneck rather than by insufficient overall network capacity.
+    This analysis identifies exactly one problematic region. Region 410 has an annual demand of 59,646 units, which exceeds the capacity of every cash center able to serve it. Consequently, no feasible assignment exists for this region, regardless of the available capacity elsewhere in the network. This explains the infeasibility observed in the optimization model and confirms that it is caused by a local capacity bottleneck rather than by insufficient overall network capacity.
     """)
     return
 
@@ -1447,11 +1382,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### The official bounds are infeasible for this dataset
+    ### The Official Bounds Are Infeasible for This Dataset
 
-    Re-solving the optimization model using the official volume bounds from the course notebook results in an infeasible solution. This outcome is not caused by an implementation error. Instead, the analysis reveals that one region (regionID 410, with an annual demand of 59,646 deliveries) exceeds the maximum capacity of every cash center within its service range. As a result, this region cannot be assigned to any feasible facility without violating the corresponding upper capacity limit, making the overall optimization problem infeasible.
+    Re-solving the optimization model using the official volume bounds from the course notebook results in an infeasible solution. This outcome is not caused by an implementation error; rather, the analysis reveals that one region (regionID 410, with an annual demand of 59,646 deliveries) exceeds the maximum capacity of every cash center within its service range. As a result, this region cannot be assigned to any feasible facility without violating the corresponding upper capacity limit, rendering the overall optimization problem infeasible.
 
-    This finding demonstrates that the official tier-based capacity bounds cannot be applied directly to the demand distribution of the present dataset. Consequently, they cannot serve as a meaningful benchmark for evaluating alternative network designs in this case study. Instead, the percentile-based capacity limits introduced earlier are used for the robustness analysis, while the infeasibility of the official bounds is reported as an important observation regarding the applicability of the reference model to this specific problem instance.
+    This finding demonstrates that the official tier-based capacity bounds cannot be applied directly to the demand distribution of the present dataset, and consequently cannot serve as a meaningful benchmark for evaluating alternative network designs in this case study. The percentile-based capacity limits introduced earlier are therefore used for the robustness analysis instead, while the infeasibility of the official bounds is reported as an important observation regarding the applicability of the reference model to this specific problem instance.
     """)
     return
 
@@ -1459,9 +1394,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Having validated the base model and identified its main structural limitation in the form of Guadalajara’s uncapped volume requirement, as well as the cost impact of the more conservative capped alternative, we now shift the analysis from internal feasibility checks to external sensitivity.
+    ### Transitioning to the Sensitivity Analysis
 
-    While the previous sections focused on whether the model is internally consistent and operationally feasible under different capacity assumptions, the following analysis examines how robust the recommended network is to changes in external conditions. In particular, we investigate how variations in cash demand, wage and fuel costs, technological improvements, and the assumed economies of scale affect the optimal network configuration and total cost. This constitutes the sensitivity analysis.
+    Having validated the base model and identified its main structural limitation — Guadalajara's uncapped volume requirement — along with the cost impact of the more conservative capped alternative, the analysis now shifts from internal feasibility checks to external sensitivity.
+
+    While the preceding sections focused on whether the model is internally consistent and operationally feasible under different capacity assumptions, the following analysis examines how robust the recommended network is to changes in external conditions. In particular, it investigates how variations in cash demand, wage and fuel costs, technological improvements, and the assumed economies of scale affect the optimal network configuration and total cost. This constitutes the sensitivity analysis.
     """)
     return
 
@@ -1469,16 +1406,13 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Part 5 — Sensitivity analysis (in marimo mit slider + graph. Dann einfach die werte die wir schon haben als specific scenario analysis)
+    ## 6. Sensitivity Analysis
 
     The robustness of the recommended network is evaluated along four dimensions:
 
-    1. **Cost parameters: economies-of-scale strength ($\alpha$) and processing cost anchor** — these represent internal modeling assumptions. The analysis examines whether the observed preference for smaller centers remains stable under stronger or weaker scale effects.
-
+    1. **Cost parameters: economies-of-scale strength ($\alpha$) and the processing-cost anchor** — these represent internal modeling assumptions. The analysis examines whether the observed preference for smaller centers remains stable under stronger or weaker scale effects.
     2. **Declining cash demand** — reflecting industry-wide reductions in cash usage, scenarios of -10%, -30%, and -50% demand are considered.
-
     3. **Increasing wages and fuel costs** — operational cost sensitivity is assessed by systematically increasing shift-related costs.
-
     4. **Technological development** — potential innovations such as autonomous vehicles are represented through reduced crew costs, extended usable shifts, and improved travel efficiency.
 
     For each scenario, the optimization model is re-solved and the resulting network is compared to the baseline solution in terms of total cost, number of open centers, and changes in facility activation status. The results are then consolidated into a robustness assessment distinguishing between consistently selected facilities ("keep"), consistently closed facilities ("close"), and scenario-dependent facilities ("uncertain") requiring further consideration.
@@ -1489,7 +1423,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.1 a Economies-of-scale strength ($\alpha$)
+    ### 6.1 a Economies-of-scale strength ($\alpha$)
 
     The economies-of-scale parameter $\alpha$, scales how strongly variable processing costs decrease with increasing facility size. We test the sensitivity of our results by re-solving the model across the full range of $\alpha \in [0, 1]$ in steps of 0.05, while keeping all other parameters fixed at their baseline levels. This lets us plot the cost response over the entire range and then look at specific values more concretely. In particular, we examine $\alpha = 0.3$, $\alpha = 0.5$ (our baseline), $\alpha = 0.7$ and $\alpha = 1.0$ in more detail.
 
@@ -1552,17 +1486,11 @@ def _(alpha_results, display, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Overall the total cost decreases smoothly and monotonically as α\alpha
-    α increases, falling by only about 3% across the full range from α=0\alpha = 0
-    α=0 to α=1\alpha = 1
-    α=1. This confirms our expectation that α\alpha
-    α has a relatively minor effect on overall cost levels, with no abrupt jumps that would indicate major structural changes in the network
+    Overall, total cost decreases smoothly and monotonically as $\alpha$ increases, falling by only about 3% across the full range from $\alpha = 0$ to $\alpha = 1$. This confirms the expectation that $\alpha$ has a relatively minor effect on overall cost levels, with no abrupt jumps that would indicate major structural changes in the network.
 
-    At $\alpha = 1.0$, five small ("v"/"s") cash centers close: Avila, Cordoba, Guadalajara, Huelva, and Orense. At the same time, four larger centers open: Pontevedra, Sevilla, Toledo, and Zamora. From a geographical perspective, this pattern appears consistent with an intuitive redistribution of service areas.
+    At $\alpha = 1.0$, five small ("v"/"s") tier cash centers close: Avila, Cordoba, Guadalajara, Huelva, and Orense. At the same time, four larger centers open: Pontevedra, Sevilla, Toledo, and Zamora. From a geographical perspective, this pattern appears consistent with an intuitive redistribution of service areas: based on their locations, Sevilla likely absorbs demand previously served by Huelva and Cordoba, Toledo likely takes over the service areas of Avila and Guadalajara, and Pontevedra appears to replace Orense in the northwest region. These interpretations are based solely on geographic proximity.
 
-    Based on their locations, Sevilla is likely to absorb demand previously served by Huelva and Cordoba, while Toledo may take over the service areas of Avila and Guadalajara. Pontevedra appears to replace Orense in the northwest region. These interpretations are based solely on geographic proximity.
-
-    In the following section, we analyze the exact reassignment of regions to confirm and quantify these changes.
+    The exact reassignment of regions is analyzed in the following section to confirm and quantify these changes.
     """)
     return
 
@@ -1570,7 +1498,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Closer look: verifying the reassignment
+    ### Verifying the reassignment
     """)
     return
 
@@ -1613,9 +1541,9 @@ def _(mo):
     mo.md(r"""
     Tracing the actual region-level reassignment confirms the geographic intuition, although the pattern is more nuanced. In total, 189 of 515 regions are reassigned to a different center when $\alpha = 1.0$.
 
-    A substantial share of these changes is directly driven by the closure of the five small centers. In particular, Sevilla absorbs all 35 regions previously served by Huelva (19) and Cordoba (16), fully consistent with the initial hypothesis. The remaining 31 reassigned regions are redistributed among centers that remain active in both scenarios, indicating that changes in $\alpha$ affect relative cost structures across the entire network rather than only locally around opening and closing facilities.
+    A substantial share of these changes is directly driven by the closure of the five small centers, which together account for 158 of the 189 reassigned regions. Sevilla alone absorbs all 35 regions previously served by Huelva (19) and Cordoba (16), fully consistent with the initial hypothesis. The remaining 31 reassigned regions, however, are redistributed among centers that remain active in both scenarios, indicating that changes in $\alpha$ affect relative cost structures across the entire network rather than only locally around the facilities that open and close.
 
-    Despite this additional reshuffling, the broader structural pattern remains stable. Stronger economies of scale favor a moderate consolidation toward higher-tier centers, rather than extreme centralization. This contrasts with the capped-volume scenario analyzed earlier, where capacity constraints forced the activation of a full "h"-tier center (Madrid).
+    Despite this additional reshuffling, the broader structural pattern remains stable: stronger economies of scale favor a moderate consolidation toward higher-tier centers, rather than extreme centralization. This contrasts with the capped-volume scenario analyzed earlier, where capacity constraints forced the activation of a full "h" tier center (Madrid).
     """)
     return
 
@@ -1623,11 +1551,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.1b Processing-cost anchor sensitivity
+    ### 6.1b Processing-Cost Anchor Sensitivity
 
-    Besides $\alpha$, the second free parameter in the derivation of $c_t^{var}$ is the 15% share of median transport cost per delivery used to anchor $c_v^{var}$. To assess the sensitivity of this assumption, the model is re-solved across the full range from 10% to 25% in steps of 1%, while keeping $\alpha = 0.5$ fixed. This lets us plot the cost response over the entire range and then look at the anchor shares of 10%, 15% (our baseline), and 25% more concretely.
+    Besides $\alpha$, the second free parameter in the derivation of $c_t^{var}$ is the 15% share of median transport cost per delivery used to anchor $c_v^{var}$. The sensitivity of this assumption is assessed by re-solving the model across the full range from 10% to 25% in steps of 1%, while keeping $\alpha = 0.5$ fixed. This allows the cost response to be plotted over the entire range before examining the anchor shares of 10%, 15% (the baseline), and 25% more concretely.
 
-    Increasing the anchor share raises $c_v^{var}$ proportionally across all tiers, thereby increasing the relative cost of in-house processing compared to transportation. In principle, this should shift the network toward a stronger emphasis on transport cost efficiency. However, since this adjustment affects all tiers uniformly, its impact is expected to be much smaller compared to $\alpha$, which alters the relative cost differences between tiers rather than only shifting the overall cost level.
+    Increasing the anchor share raises $c_v^{var}$ proportionally across all tiers, thereby increasing the relative cost of in-house processing compared to transportation. In principle, this should shift the network toward a stronger emphasis on transport cost efficiency. However, since this adjustment affects all tiers uniformly, its impact is expected to be much smaller than that of $\alpha$, which alters the relative cost differences between tiers rather than only shifting the overall cost level.
     """)
     return
 
@@ -1673,13 +1601,13 @@ def _(anchor_results, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The processing-cost anchor shows a similarly modest sensitivity compared to $\alpha$, across the tested range (10% to 25%), which more than covers plausible uncertainty around the baseline value of 15%. Total cost increases almost linearly with the anchor share and vary by approximately -5% to +10%. The tier structure changes only marginally at the upper end of the range.
+    The processing-cost anchor shows a similarly modest sensitivity to $\alpha$: across the tested range (10% to 25%), which more than covers plausible uncertainty around the baseline value of 15%, total cost increases almost linearly with the anchor share, varying by approximately -5% to +10% relative to baseline. The tier structure changes only marginally at the upper end of the range.
 
     Taken together with the results for $\alpha$, this confirms that the derivation of $c_t^{var}$, although based on two explicit modeling assumptions (the anchor share and the economies-of-scale parameter), does not lead to a fragile network recommendation. When varied independently within a reasonable range, neither parameter alters the qualitative conclusion that a network dominated by smaller centers is cost-optimal.
 
-    Interestingly, the same structural reconfiguration is observed as in the $\alpha = 1.0$ scenario. In both cases, the same five centers close (Avila, Cordoba, Guadalajara, Huelva, and Orense), while four centers open (Pontevedra, Sevilla, Toledo, and Zamora). This is not coincidental: both $\alpha$ and the anchor share parameter shift incentives in the same direction by increasing the relative attractiveness of larger tiers, each through different mechanisms, relative cost curvature in the case of $\alpha$, and a uniform upward shift in processing costs in the case of the anchor share.
+    Interestingly, the same structural reconfiguration observed under $\alpha = 1.0$ recurs here: in both cases, the identical set of five centers closes (Avila, Cordoba, Guadalajara, Huelva, and Orense), while the identical set of four centers opens (Pontevedra, Sevilla, Toledo, and Zamora). This is not coincidental: both $\alpha$ and the anchor share shift incentives in the same direction by increasing the relative attractiveness of larger tiers, albeit through different mechanisms: relative cost curvature in the case of $\alpha$, and a uniform upward shift in processing costs in the case of the anchor share.
 
-    The consistency of this five-center consolidation across two independent parameter variations provides a strong robustness signal. In particular, the repeated emergence of Sevilla absorbing demand from Huelva and Cordoba suggests that this restructuring is not an artifact of a specific parameter choice but a structurally stable feature of the model.
+    The consistency of this five-center consolidation across two independent parameter variations provides a strong robustness signal. In particular, the repeated emergence of Sevilla absorbing demand from Huelva and Cordoba suggests that this restructuring is not an artifact of a specific parameter choice, but a structurally stable feature of the model.
     """)
     return
 
@@ -1687,11 +1615,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.2 Falling cash demand
+    ### 6.2 Falling Cash Demand
 
-    Cash usage has been declining industry-wide as electronic payment methods continue to grow. To capture this trend, we test how the optimal network configuration responds to reductions in annual demand across the full range from 0% to 50% in steps of 5%, while keeping the base case parameters. This lets us plot the network response over the entire range and then look at reductions of 10%, 30%, and 50% more specifically.
+    Cash usage has been declining industry-wide as electronic payment methods continue to grow. To capture this trend, the model is re-solved across the full range of demand reductions from 0% to 50% in steps of 5%, while keeping all other parameters at their baseline values. This allows the network response to be plotted over the entire range before examining reductions of 10%, 30%, and 50% more specifically.
 
-    Mathematically, lower demand reduces both transport costs ($c_{ij}$) and variable processing costs ($c_t^{var} \cdot d_j$), whereas fixed facility costs ($f_i$) remain unchanged. As a result, fixed costs become increasingly dominant in the overall cost structure as demand decreases. We therefore expect the model to close more centers concentrating the lesser demand onto fewer facilities
+    Mathematically, lower demand reduces both transport costs ($c_{ij}$) and variable processing costs ($c_t^{var} \cdot d_j$), whereas fixed facility costs ($f_i$) remain unchanged. As a result, fixed costs become increasingly dominant in the overall cost structure as demand decreases. The model is therefore expected to close more centers, concentrating the reduced demand onto fewer facilities.
     """)
     return
 
@@ -1742,7 +1670,6 @@ def _(demand_slider, demand_sweep, mo, warehouses_flat):
     - Tier breakdown: {_tiers}
     - Closed vs. baseline ({len(_closed_cities)}): {', '.join(_closed_cities) if _closed_cities else '–'}
     """)
-
     return
 
 
@@ -1782,11 +1709,11 @@ def _(display, pd, solve_network, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    This expectation holds, with one notable nuance. Up until a -20% demand reduction, the network remains unchanged, indicating that moderate demand decreases are not sufficient to render any facility unprofitable. The adjustment only takes effect at higher reduction levels: at -30% demand, one "v"-tier center closes, followed by two additional "v"-tier closures at -50%. In all cases, only "v"-tier facilities are affected, while "s" and "m" tiers remain stable across all scenarios. This confirms that the smallest centers are the first to become uneconomical as volume decreases, consistent with the dominance of fixed costs.
+    This expectation holds, with one notable nuance. Up to a -20% demand reduction, the network remains unchanged, indicating that moderate demand decreases are not sufficient to render any facility unprofitable. The adjustment takes effect only at higher reduction levels: one "v" tier center closes at -30% demand, followed by two additional "v" tier closures at -50%. In all cases, only "v" tier facilities are affected, while the "s" and "m" tiers remain stable across all scenarios. This confirms that the smallest centers are the first to become uneconomical as volume decreases, consistent with the dominance of fixed costs.
 
-    A second notable finding is that total cost decreases more slowly than demand. A 50% reduction in demand leads to a cost decrease of approximately 36.7% (from €117.1M to €74.1M), rather than a proportional reduction. This deviation is driven by fixed costs, which remain unchanged for all open facilities and therefore dampen the overall cost decline. From a managerial perspective, this implies that the network exhibits a degree of cost rigidity. Even in a severe demand contraction scenario, total costs do not fall proportionally, since a reduced number of facilities can still efficiently absorb the remaining volume.
+    A second notable finding is that total cost decreases more slowly than demand. A 50% reduction in demand leads to a cost decrease of only approximately 36.7% (from €117.1M to €74.1M), rather than a proportional reduction. This deviation is driven by fixed costs, which remain unchanged for all open facilities and therefore dampen the overall cost decline. From a managerial perspective, this implies that the network exhibits a degree of cost rigidity: even under a severe demand contraction, total costs do not fall proportionally, since a reduced number of facilities can still efficiently absorb the remaining volume.
 
-    As a final step, we examine the set of closed facilities across scenarios. We examine whether the same centers that close under declining demand also appear in the previously analyzed scaling and economies-of-scale scenarios. Such overlap would indicate structurally unstable or consistently marginal locations within the network.
+    As a final step, the set of closed facilities is examined across scenarios, checking whether the same centers that close under declining demand also appear in the previously analyzed scaling and economies-of-scale scenarios. Such overlap would indicate structurally unstable or consistently marginal locations within the network.
     """)
     return
 
@@ -1812,11 +1739,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.3 Rising wages and fuel costs
+    ### 6.3 Rising Wages and Fuel Costs
 
-    Labor and fuel costs may increase due to inflation or regulatory changes. To capture this effect, we re-solve the model across the full range from +0% to +50% shift-cost increase in steps of 5% (from €480 up to €720), while keeping all other model assumptions at their baseline values. This lets us plot the network response over the entire range and then look at the increases of +20% (€576) and +50% (€720) more concretely.
+    Labor and fuel costs may increase due to inflation or regulatory changes. To capture this effect, the model is re-solved across the full range from +0% to +50% shift-cost increase in steps of 5% (from €480 up to €720), while keeping all other model assumptions at their baseline values. This allows the network response to be plotted over the entire range before examining the increases of +20% (€576) and +50% (€720) more concretely.
 
-    Shift costs directly affect the transport cost component $c_{ij}$. Higher shift costs increase the cost of every transport link, with a stronger impact on long-distance and thus less efficient assignments. As a result, the model is expected to favor a more decentralized network structure with a higher number of smaller centers, each serving geographically closer regions. This represents the opposite direction of the adjustment observed in the falling-demand scenario, where consolidation becomes optimal.
+    Shift costs directly affect the transport cost component $c_{ij}$. Higher shift costs increase the cost of every transport link, with a stronger impact on long-distance and thus less efficient assignments. As a result, the model is expected to favor a more decentralized network structure with a higher number of smaller centers, each serving geographically closer regions.
     """)
     return
 
@@ -1907,13 +1834,13 @@ def _(display, pd, shift_cost_base, solve_network, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The results are more nuanced than the initial hypothesis suggested. While the expectation was that higher transport costs would favor a more decentralized network with a larger number of smaller centers, the opposite pattern emerges at the highest cost increase (+50%). In this case, the network shifts toward fewer very small centers and a greater number of medium-sized facilities (9 "v", 6 "s", 3 "m", compared to 13/4/1 in the baseline).
+    The results are more nuanced than the initial hypothesis suggested. While the expectation was that higher transport costs would favor a more decentralized network with a larger number of smaller centers, the opposite pattern emerges at the highest cost increase (+50%): the network shifts toward fewer very small centers and a greater number of medium-sized facilities (9 "v", 6 "s", 3 "m", compared to 13/4/1 in the baseline).
 
-    This outcome is consistent with the structure of the cost model. Transport costs ($c_{ij}$) and processing costs ($c_t^{var}$) are driven by different mechanisms. Increasing shift costs affects only $c_{ij}$, while leaving the relative processing-cost advantages across tiers unchanged. As transport becomes uniformly more expensive, proximity to demand becomes more important. However, the optimization increasingly favors reallocating demand to already well-positioned larger or medium-sized centers rather than opening additional small facilities. As a result, consolidation into medium tiers dominates over further fragmentation into small centers.
+    This outcome is consistent with the structure of the cost model. Transport costs ($c_{ij}$) and processing costs ($c_t^{var}$) are driven by different mechanisms: increasing shift costs affects only $c_{ij}$, leaving the relative processing-cost advantages across tiers unchanged. As transport becomes uniformly more expensive, proximity to demand becomes more important; however, the optimization increasingly favors reallocating demand to already well-positioned larger or medium-sized centers rather than opening additional small facilities. As a result, consolidation into medium tiers dominates over further fragmentation into small centers.
 
-    At intermediate levels (+10% - 30%), the network temporarily opens one additional facility before returning to 18 open centers at +50% with a different tier composition. This indicates that while the direction of the effect is consistent, the adjustment in the number of active facilities is not monotonic.
+    At intermediate levels (+10% to +30%), the network temporarily opens one additional facility before returning to 18 open centers at +50%, albeit with a different tier composition. This indicates that while the direction of the effect is consistent, the adjustment in the number of active facilities is not monotonic.
 
-    To verify that this behavior is not an artifact of the solver, we next inspect the newly opened "m" centers under the +50% shift cost scenario.
+    To verify that this behavior is not an artifact of the solver, the newly opened "m" tier centers under the +50% shift-cost scenario are inspected next.
     """)
     return
 
@@ -1928,9 +1855,9 @@ def _(shiftcost_results, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Alicante was already in the base solution, whereas Sevilla and Valencia emerge as new medium-tier facilities under the +50% shift cost scenario. The appearance of Sevilla is consistent with the $\alpha$ and cost anchor sensitivity analysis, where it also acted as a consolidation hub for southwestern Spain. The fact that three independent stress tests identify the same structural role for Sevilla strengthens the evidence that this location is a robust candidate for a higher-capacity facility rather than an artifact of a specific parameter choice.
+    Alicante was already present in the base solution, whereas Sevilla and Valencia emerge as new medium-tier facilities under the +50% shift-cost scenario. The appearance of Sevilla is consistent with the $\alpha$ and processing-cost-anchor sensitivity analyses, where it also acted as a consolidation hub for southwestern Spain. The fact that three independent stress tests identify the same structural role for Sevilla strengthens the evidence that this location is a robust candidate for a higher-capacity facility, rather than an artifact of a specific parameter choice.
 
-    Valencia, by contrast, is specific to the rising transport cost scenario. Its emergence suggests that higher shift costs make consolidation in the eastern coastal region economically attractive, a pattern that was not triggered under either the demand or cost variations. This highlights that different cost drivers activate different regional consolidation mechanisms within the network.
+    Valencia, by contrast, is specific to the rising-transport-cost scenario. Its emergence suggests that higher shift costs make consolidation in the eastern coastal region economically attractive. A pattern that was not triggered under either the demand or cost-parameter variations. This highlights that different cost drivers activate different regional consolidation mechanisms within the network.
     """)
     return
 
@@ -1938,14 +1865,14 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.4 New technology
+    ### 6.4 New Technology
 
-    Emerging technologies such as autonomous trucks or drone-based delivery systems could fundamentally alter the cost structure of the network. To capture these potential developments, we consider two scenarios:
+    Emerging technologies such as autonomous trucks or drone-based delivery systems could fundamentally alter the cost structure of the network. To capture these potential developments, two scenarios are considered:
 
-    * **Autonomous (no crew):** the removal of the three-person crew reduces the dominant cost component of a shift. We model this as a reduction in shift costs to 40% of the current level (from €480 to €192).
+    * **Autonomous (no crew):** the removal of the three-person crew reduces the dominant cost component of a shift. This is modeled as a reduction in shift costs to 40% of the current level (from €480 to €192).
     * **Autonomous + 24/7 operation + increased speed:** in addition to automation, vehicles are assumed to operate continuously (increasing usable shift time from 450 to 900 minutes) and to travel faster, reducing travel times by 20%.
 
-    In the first scenario, lower shift costs directly reduce transport cost components ($c_{ij}$). This lowers the penalty of serving distant regions and may therefore favor a more centralized structure, as longer routes become relatively less costly compared to maintaining additional local facilities.
+    In the first scenario, lower shift costs directly reduce the transport cost component ($c_{ij}$). This lowers the penalty of serving distant regions and may therefore favor a more centralized structure, as longer routes become relatively less costly compared to maintaining additional local facilities.
 
     The second scenario further increases effective network reachability, as more assignments fall within feasible time constraints due to extended operating hours and reduced travel times. As a result, a more substantial restructuring of the network can be expected, potentially affecting both facility locations and assignment patterns.
     """)
@@ -2001,13 +1928,13 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.5 Overlap comparison
+    ### 6.5 Overlap Comparison
 
-    Before finalizing the recommendation, we address an additional robustness question. The decision not to impose volume caps results in a network that is structurally dominated by small centers. This pattern remains consistent across the sensitivity analyses, as none of the economic scenarios introduce explicit capacity constraints. To further validate the robustness of the resulting network structure, we conduct a final cross-check.
+    Before finalizing the recommendation, one additional robustness question is addressed. The decision not to impose volume caps results in a network that is structurally dominated by small centers. This pattern remains consistent across the sensitivity analyses, as none of the economic scenarios introduce explicit capacity constraints. To further validate the robustness of the resulting network structure, a final cross-check is conducted.
 
-    We compare the set of open centers in the capacity-constrained (capped) model with the centers favored under independent economic stress scenarios, including stronger economies of scale, higher processing-cost anchors, and rising transport costs. This comparison is conducted deliberately against the scenario-based results rather than the uncapped baseline, since the latter differs by construction due to the absence of capacity restrictions.
+    The set of open centers in the capacity-constrained (capped) model is compared with the centers favored under independent economic stress scenarios, including stronger economies of scale, higher processing-cost anchors, and rising transport costs. This comparison is conducted deliberately against the scenario-based results rather than the uncapped baseline, since the latter differs by construction due to the absence of capacity restrictions.
 
-    If the capped solution shows substantial overlap with the centers that are repeatedly selected under these independent parameter variations, this provides evidence that the resulting network structure is not merely an artifact of a specific capacity threshold and should therefore be weighted more heavily in our final recommendation.
+    If the capped solution shows substantial overlap with the centers repeatedly selected under these independent parameter variations, this provides evidence that the resulting network structure is not merely an artifact of a specific capacity threshold, and should therefore be weighted more heavily in the final recommendation.
     """)
     return
 
@@ -2038,7 +1965,13 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    We do an additional Volume check of the capped model. We have not done this when we were using the capped model as a simple first comparison. This should give us an idea how to volume is redistributed when volume caps are introduced.
+    The results confirm strong and consistent overlap between the capped network and the centers favored under independent economic stress scenarios. Of the 19 centers open in the capped solution, 13 (68.4%) are also open under both $\alpha = 1.0$ and anchor $= 0.25$, while 12 (63.2%) remain open under shiftcost $= 1.5$.
+
+    This consistency across three independently derived scenarios indicates that the capacity-constrained network is not merely an artifact of the specific 1.5x-percentile threshold chosen, but reflects a structurally stable core that also emerges under entirely different economic pressures. The capped solution can therefore be weighted more heavily in the final recommendation, rather than treated as an isolated sensitivity check.
+
+    ### 6.6 Volume Redistribution Under Capacity Constraints
+
+    As a final check, the redistribution of volume within the capped model is examined more closely. This step was not part of the earlier capacity comparison, where the capped and uncapped solutions were contrasted only in terms of total cost, network size, and tier composition. Here, the focus shifts to how volume is distributed across centers once caps are introduced, providing a clearer picture of whether the capped network relies on a small number of facilities operating near their limits or spreads volume more evenly across the network.
     """)
     return
 
@@ -2053,33 +1986,11 @@ def _(link_keys, open_centers_capped, pd, regions_flat, warehouses_flat, x_c):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The disagreements are informative. Madrid appears only in the capped network. Consistent with our earlier
-    finding that a) economic stress scenarios consolidate into
-    "s"/"m" tiers but never reach for a full "h"-tier facility on their own and b) the optimizer will assign a very high demand to a small warehouse if volume bounds are not accounted for;
-    only a hard capacity constraint forces the network that far. Conversely,
-    Pontevedra, Toledo, and Sevilla are favored under
-    economic stress but not needed once a hard cap is imposed. The capped
-    model instead spreads the demand across more, smaller centers
-    (Almeria, Cordoba, Santander, Lerida among them) rather than consolidating
-    it into a medium hub.
+    The disagreements are informative. Madrid appears only in the capped network, consistent with two earlier findings: (a) economic stress scenarios consolidate into "s"/"m" tiers but never reach for a full "h" tier facility on their own, and (b) the optimizer will assign a very high volume to a small warehouse if capacity bounds are not accounted for — only a hard capacity constraint forces the network that far. Conversely, Pontevedra, Toledo, and Sevilla are favored under economic stress but not needed once a hard cap is imposed; the capped model instead spreads the corresponding demand across more, smaller centers (including Almeria, Cordoba, Santander, and Lerida) rather than consolidating it into a medium-sized hub.
 
-    After checking the capped solution itself for new outliers, Madrid (now "h"-tier)
-    carries 826,543 units, even more than Guadalajara's original 716,917.
+    After checking the capped solution itself for new outliers, Madrid (now "h" tier) carries 826,543 units — even more than Guadalajara's original 716,917. Unlike Guadalajara, however, this figure is plausible: Madrid's fixed cost (€35.9M) reflects the size class with the highest fixed-cost level in the tier structure, and 826,543 lies well within a plausible volume range for that tier. The second-largest facility, Alicante ("m", 245,965), and the remaining "s"/"v" centers all fall within plausible ranges for their respective tiers — the capped model does not introduce a new hidden-outlier problem.
 
-    Unlike Guadalajara, though, this is plausible. Madrid's fixed cost
-    (35.9M€) reflects the size class in our tier structure with the highest
-    fixed-cost level, and 826,543 is well within a plausible volume range for that tier. The
-    second-largest, Alicante ("m", 245,965), and the remaining "s"/"v" centers
-    all fall within plausible ranges for their respective tiers — the capped
-    model does not introduce a new hidden outlier problem.
-
-    This gives us confidence that the capped network is not an artifact of one
-    arbitrary threshold choice: a large majority of its structure is
-    independently corroborated by scenarios that know nothing about capacity
-    limits. We therefore weight the capped model heavily in our final
-    recommendation, while treating the handful of centers that appear in one
-    view but not the other as points warranting closer, case-by-case review
-    rather than settled conclusions.
+    This provides confidence that the capped network is not an artifact of one arbitrary threshold choice: a large majority of its structure is independently corroborated by scenarios that have no knowledge of capacity limits. Notably, this also resolves the concern raised earlier: whereas Guadalajara's oversized volume sat implausibly within the smallest tier, Madrid's comparably large volume here sits within the tier explicitly built for the largest facilities. The capped model is therefore weighted heavily in the final recommendation, while the handful of centers that appear in one view but not the other are treated as points warranting closer, case-by-case review rather than settled conclusions.
     """)
     return
 
@@ -2087,35 +1998,24 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Part 6 — Robust recommendation
+    ## 7. Robust Recommendation
 
-    We synthesize all scenarios into a single recommendation. For each center we
-    record, across every scenario we solved, whether it was open. We then
-    classify each center:
+    All scenarios are synthesized into a single recommendation. For each center, it is recorded whether it was open across every scenario solved. While the sensitivity analysis in Section 6 was framed around a three-way distinction between consistently selected, consistently closed, and scenario-dependent facilities, the results reveal that the "scenario-dependent" category itself contains meaningfully different situations: some centers are contested because they are favored only under capacity constraints, others only under economic stress, and still others under both simultaneously. The classification is therefore refined into a more granular set of categories:
 
-    - **Keep** — open in base and all or all but one scenario, including the capped model.
-      Safe regardless of how the future unfolds.
-    - **Review** — open in the base case but unpredictable in multiple scenarios. Worth monitoring, not an immediate action.
-    - **Reconsider** — open in base but closes under multiple independent scenarios, or is the
-      specific center flagged by our capacity check (Guadalajara). The strongest
-      candidates for closer attention.
-    - **Expansion candidate** — closed in the base case but opens under stress
-      or capacity constraints. At least two alternative networks. Not part of today's
-      network, but relevant if conditions change.
+    - **Keep** — open in the base case and in all or all but one scenario, including the capped model. Safe regardless of how the future unfolds.
+    - **Review** — open in the base case but unpredictable across multiple scenarios. Worth monitoring, not an immediate action.
+    - **Reconsider** — open in the base case but closes under multiple independent scenarios, or is the specific center flagged by the capacity check (Guadalajara). The strongest candidates for closer attention.
+    - **Confirmed closed** — closed in the base case and in virtually every scenario tested. No evidence supports opening these centers under any considered condition.
+    - **Expansion candidate (capacity + economic — strongest signal)** — closed in the base case but opens under both the capacity-constrained model and independent economic stress scenarios. The most strongly supported candidates for future expansion.
+    - **Expansion candidate (capacity-driven)** — closed in the base case but opens only once a hard capacity constraint is imposed, never under any purely economic scenario.
+    - **Expansion candidate (economic stress only)** — closed in the base case but opens only under economic stress scenarios, not under the capacity-constrained model.
+    - **Negligible** — appears in only a single scenario, with no clear or consistent signal in either direction.
 
-    A methodological note on Madrid and similar cases. Madrid and similar centers appear open only in the capacity-constrained model, never under
-    any of the 11 purely economic scenarios. This is not a weak signal, if
-    anything, it deserves more weight than the economic-stress signals below,
-    not less. None of the 11 economic scenarios impose any capacity limit, so
-    they are structurally incapable of ever favoring a large facility. An
-    uncapped small center is always cheaper on paper, regardless of how extreme
-    the economic parameters get. Only the capacity-constrained model actually
-    tests the question these centers answer. Since we already argued that the capped model is our best available proxy for real-world
-    capacity limits, the one dimension of the analysis with a genuine, data-
-    grounded reason to trust it over the uncapped alternative. A center
-    favored*specifically by that model should be read as a stronger, not
-    weaker, signal than one merely appearing in several economically stressed
-    but still uncapped scenarios.
+    ### A methodological note on Madrid and similar cases
+
+    Madrid and similar centers appear open only in the capacity-constrained model, never under any of the 11 purely economic scenarios. This is not a weak signal — if anything, it deserves more weight than the economic-stress signals discussed above, not less. None of the 11 economic scenarios impose any capacity limit, so they are structurally incapable of ever favoring a large facility: an uncapped small center is always cheaper on paper, regardless of how extreme the economic parameters become. Only the capacity-constrained model actually tests the question these centers answer.
+
+    As argued earlier, the capped model is the best available proxy for real-world capacity limits — the one dimension of the analysis with a genuine, data-grounded reason to be trusted over the uncapped alternative. A center favored specifically by that model should therefore be read as a stronger, not weaker, signal than one that merely appears across several economically stressed but still uncapped scenarios.
     """)
     return
 
@@ -2176,12 +2076,13 @@ def _(
 def _(status_df):
     def classify(row):
         if row["in_base"]:
-            if row["n_open_econ"] >= row["n_total_econ"] - 1:
-                return "Keep"
-            elif row["n_open_econ"] <= row["n_total_econ"] - 3:
-                return "Reconsider"
+            if row["in_capped"]:
+                if row["n_open_econ"] >= row["n_total_econ"] - 1:
+                    return "Keep"
+                else:
+                    return "Review"  # still in capped network, but less robust economically
             else:
-                return "Review"
+                return "Reconsider"  # capacity check drops it, regardless of economic count
         else:
             if row["in_capped"] and row["n_open_econ"] >= 2:
                 return "Expansion candidate (capacity + economic — strongest signal)"
@@ -2202,35 +2103,35 @@ def _(status_df):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Interpreting the classification
+    ### Interpreting the Classification
 
-    **Keep — the stable core (10 centers).** Vitoria, Alicante, Almeria, Caceres, Gerona, Huesca, Jaen, Leon, Tarragona, and Cuenca remain open in 10 or 11 of the 11 economic scenarios and are also selected by the capacity-constrained model. These centers form the robust backbone of the recommended network and remain stable under virtually every future we tested.
+    **Keep — the stable core (10 centers).** Vitoria, Alicante, Almeria, Caceres, Gerona, Huesca, Jaen, Leon, Tarragona, and Cuenca remain open in 10 or 11 of the 11 economic scenarios and are also selected by the capacity-constrained model. These centers form the robust backbone of the recommended network and remain stable under virtually every future tested.
 
-    **Review — demand-sensitive (3 centers).** Burgos, Lugo, and Teruel remain open in 9 of the 11 economic scenarios but are not consistently selected under all assumptions. They do not currently warrant structural changes, but should be monitored if demand patterns shift.
+    **Review — demand-sensitive (5 centers).** Lugo, Teruel, Cordoba, Huelva, and Orense remain open in both the base case and the capacity-constrained model, but drop out under several independent economic stress scenarios (7 to 9 of 11). They are part of the recommended network but are not as unconditionally robust as the "Keep" group, and should be monitored if economic conditions shift.
 
-    **Reconsider — potential consolidation candidates (5 centers).** Avila, Guadalajara, Cordoba, Huelva, and Orense are part of today's network but lose their role under several alternative assumptions, including stronger economies of scale and, in several cases, the capacity-constrained model. Guadalajara remains particularly noteworthy because our volume analysis identified it as carrying an implausibly high throughput in the unconstrained solution. These locations are the strongest candidates for network consolidation or operational review.
+    **Reconsider — potential consolidation candidates (3 centers).** Burgos, Avila, and Guadalajara are part of today's network but are not selected by the capacity-constrained model, despite remaining open under most purely economic scenarios. Burgos is a particularly clear illustration of why the capacity check takes precedence: it shows one of the highest economic-scenario counts overall (9 of 11) — higher, in fact, than several centers classified as "Review" — yet it is still not selected once realistic capacity constraints are imposed. Guadalajara remains especially noteworthy, since the earlier volume analysis identified it as carrying an implausibly high throughput in the unconstrained solution. These locations are the strongest candidates for network consolidation or operational review.
 
-    **Confirmed closed (15 centers).** Barcelona, Ciudad Real, La Coruña, Granada, San Sebastian, La Rioja, Navarra, Oviedo, Palencia, Salamanca, Segovia, Soria, Valladolid, Bilbao, and Zaragoza never appear in any recommended network, neither across the 11 economic scenarios nor under the capacity-constrained model. This provides the strongest possible evidence that these facilities are not required in the future network. Barcelona is especially notable: despite being a large ("l") center, it never becomes attractive, whereas Madrid (tier "h") does once realistic capacity limits are introduced.
+    **Confirmed closed (15 centers).** Barcelona, Ciudad Real, La Coruña, Granada, San Sebastian, La Rioja, Navarra, Oviedo, Palencia, Salamanca, Segovia, Soria, Valladolid, Bilbao, and Zaragoza never appear in any recommended network, neither across the 11 economic scenarios nor under the capacity-constrained model. This provides the strongest possible evidence that these facilities are not required in the future network. Barcelona is especially notable: despite being a large ("l") tier center, it never becomes attractive, whereas Madrid (tier "h") does once realistic capacity limits are introduced.
 
-    **Expansion candidate — capacity + economic (1 center).** Zamora is the strongest expansion signal in the entire analysis. It is selected by the capacity-constrained model and also appears in five of the eleven economic scenarios, making it a location supported independently by both modelling approaches.
+    **Expansion candidate — capacity + economic (1 center).** Zamora is the strongest expansion signal in the entire analysis. It is selected by the capacity-constrained model and also appears in five of the eleven economic scenarios, making it a location independently supported by both modeling approaches.
 
-    **Expansion candidate — capacity-driven (3 centers).** Madrid, Lerida, and Santander basically (Santander once econ) appear only when realistic capacity constraints are introduced. Although they receive little support from the purely economic scenarios, this reflects the fact that those models assume unlimited facility capacity. Since capacity realism is considered our preferred planning perspective, these locations deserve serious consideration.
+    **Expansion candidate — capacity-driven (3 centers).** Madrid, Lerida, and Santander appear almost exclusively once realistic capacity constraints are introduced (Santander appears in one economic scenario as well). Although they receive little support from the purely economic scenarios, this reflects the fact that those models assume unlimited facility capacity. Since capacity realism is considered the preferred planning perspective in this analysis, these locations deserve serious consideration.
 
     **Expansion candidate — economic stress only (4 centers).** Pontevedra and Sevilla receive the strongest support within this group, each appearing in four economic scenarios, followed by Toledo (three) and Valencia (two). Because none are confirmed by the capacity-constrained model, these represent secondary expansion opportunities rather than immediate recommendations.
 
-    **Negligible (1 center).** Albacete appears in only a single economic scenario and is not supported by the capacity-constrained model. We therefore do not draw any practical conclusion from this isolated result.
+    **Negligible (1 center).** Albacete appears in only a single economic scenario and is not supported by the capacity-constrained model. No practical conclusion is drawn from this isolated result.
 
-    ### Overall recommendation
+    ### Overall Recommendation
 
-    The main conclusion of this study is not simply which facilities should remain open, but that the unconstrained cost-minimising network systematically relies on an unrealistic assumption of unlimited facility capacity. Removing the overloaded Guadalajara facility alone changes the total cost only marginally because the model simply shifts the excessive volume to another small center. In contrast, introducing realistic capacity limits produces a substantially different network, demonstrating that capacity assumptions fundamentally shape the optimal solution.
+    The main conclusion of this study is not simply which facilities should remain open, but that the unconstrained cost-minimizing network systematically relies on an unrealistic assumption of unlimited facility capacity. Removing the overloaded Guadalajara facility in isolation changes total cost only marginally, since the model reallocates the displaced volume to another small center rather than restructuring the network. Introducing realistic capacity limits, by contrast, yields a substantially different configuration, demonstrating that capacity assumptions fundamentally shape the optimal solution.
 
-    We therefore recommend adopting the capacity-constrained network as the primary implementation plan. This recommendation is reinforced by the robustness analysis. Ten facilities remain stable across virtually all scenarios, fifteen facilities are consistently rejected, and only a small number of locations require managerial judgement. Among all potential expansions, Zamora stands out as the strongest candidate because it is independently supported by both the economic scenario analysis and the capacity-constrained optimisation. Consequently, CashLog's next practical steps should be to verify Guadalajara's true processing capacity and evaluate Zamora, Madrid, Lerida, and Santander as the most promising candidates for future network expansion.
+    We therefore recommend adopting the capacity-constrained network as the primary implementation plan. This recommendation is reinforced by the robustness analysis: ten facilities remain stable across virtually all scenarios, a further five are retained but show greater sensitivity to economic conditions, and fifteen are consistently rejected. The remaining twelve locations require managerial judgment: three are candidates for consolidation, eight are candidates for expansion under varying degrees of support, and one shows no clear signal in either direction. Among the potential expansions, Zamora emerges as the strongest candidate, as it is independently supported by both the economic scenario analysis and the capacity-constrained optimization.
     """)
     return
 
 
 @app.cell
-def _(display, folium, status_df, warehouses_flat):
+def _(folium, status_df, warehouses_flat):
     # Mittelpunkt der Karte
     center_lat = warehouses_flat["lat"].mean()
     center_lon = warehouses_flat["lon"].mean()
@@ -2313,39 +2214,40 @@ def _(display, folium, status_df, warehouses_flat):
 
     m_final.get_root().html.add_child(folium.Element(legend_html))
 
-    display(m_final)
+    m_final
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 7. Review & Limitations
+    ## 8. Review & Limitations
 
-    ### Review of model development and key findings
+    ### Review of Model Development and Key Findings
 
-    This study developed a location–allocation optimization model for CashLog’s Spanish cash center network, starting from a transportation-cost structure that was not predefined and therefore had to be derived endogenously from the available data. After constructing and validating a distance-based cost function—closely matching the course benchmark—we observed that transport costs increase non-linearly as assignments approach feasibility limits, confirming the importance of spatial realism in the network structure. During validation, we identified several zero-travel-time but heterogeneous cost pairs; these were traced back to consistent data patterns rather than data errors, supporting the reliability of the underlying dataset.
-    We then extended the model by introducing size-dependent processing costs based on five empirically derived facility tiers. Economies of scale were modeled using a dampened power function calibrated through a combination of fixed-cost ratios and an externally anchored baseline processing cost. This introduced several necessary but assumption-driven design choices, including the scaling exponent, functional form, and cost anchoring, all of which were later tested in sensitivity analysis.
+    This study developed a location–allocation optimization model for CashLog's Spanish cash center network, starting from a transportation-cost structure that was not predefined and therefore had to be derived endogenously from the available data. After constructing and validating a distance-based cost function — which closely matched the course benchmark — transport costs were found to increase non-linearly as assignments approach their feasibility limits, confirming the importance of spatial realism in the network structure. During validation, several zero-travel-time pairs with heterogeneous costs were identified; these were traced back to consistent data patterns rather than data errors, supporting the reliability of the underlying dataset.
 
-    A central design decision was to use fixed costs as a proxy for facility size and to exclude explicit capacity bounds in the primary model. This allowed a clean keep-or-close formulation but introduced the risk of unrealistically large allocations to small facilities, most notably Guadalajara. To address this, we constructed a separate capacity-constrained comparison model, which materially altered the network and ultimately served as the basis for the final recommendation.
+    The model was then extended by introducing size-dependent processing costs based on five empirically derived facility tiers. Economies of scale were modeled using a dampened power function, calibrated through a combination of fixed-cost ratios and an externally anchored baseline processing cost. This introduced several necessary but assumption-driven design choices — including the scaling exponent, the functional form, and the cost anchor — all of which were subsequently tested in the sensitivity analysis.
 
-    Robustness checks confirmed that the main structural results are stable across a wide range of parameter settings (economies of scale, processing-cost anchors, demand reductions, wage and fuel shocks, and technological changes). Despite variation in network size and composition, a stable core of facilities emerged consistently, forming the backbone of the final recommendation.
+    A central design decision was to use fixed costs as a proxy for facility size and to exclude explicit capacity bounds in the primary model. This allowed a clean keep-or-close formulation but introduced the risk of unrealistically large allocations to small facilities, most notably Guadalajara. To address this, a separate capacity-constrained comparison model was constructed, which materially altered the network and ultimately served as the basis for the final recommendation.
 
-    ### Key structural limitations
+    Robustness checks confirmed that the main structural results are stable across a wide range of parameter settings (economies of scale, processing-cost anchors, demand reductions, wage and fuel shocks, and technological changes). A stable core of ten facilities remained open across virtually all scenarios, forming the backbone of the final recommendation. Notably, the analysis also revealed that different types of stress affect different parts of the network: cost-structure variations (economies of scale, processing-cost anchor) consistently pressured the same five southwestern centers, whereas demand reductions and rising transport costs affected entirely different facilities. This indicates that no single group of "marginal" centers exists; rather, vulnerability depends on the specific type of structural change considered.
+
+    ### Key Structural Limitations
 
     Despite the extensive robustness analysis, several limitations remain that should be considered when interpreting the results.
 
-    First, the transportation cost function had to be derived entirely from the available data because the case study did not specify a cost model. Although our formulation closely matched the course benchmark and produced plausible cost patterns, alternative cost functions could lead to different network designs.
+    First, the transportation cost function had to be derived entirely from the available data, since the case study did not specify a cost model. Although the formulation closely matched the course benchmark and produced plausible cost patterns, alternative cost functions could lead to different network designs.
 
-    Second, the processing-cost model relies on several assumptions. Facility size was inferred from fixed costs, economies of scale were represented by a dampened power function, and the initial processing-cost anchor was derived as 15% of the median transportation cost. While we explicitly tested the two most influential parameters (the scaling exponent and processing-cost anchor) in the sensitivity analysis, the underlying functional form remains an assumption rather than an empirically validated relationship.
+    Second, the processing-cost model relies on several assumptions. Facility size was inferred from fixed costs, economies of scale were represented by a dampened power function, and the initial processing-cost anchor was derived as 15% of the median transportation cost. While the two most influential parameters (the scaling exponent and the processing-cost anchor) were explicitly tested in the sensitivity analysis, the underlying functional form remains an assumption rather than an empirically validated relationship.
 
-    Third, our primary optimization model deliberately assumes unlimited processing capacity at each cash center and treats center size as fixed rather than a decision variable. This choice avoids introducing additional assumptions regarding facility resizing, capacity expansion, or transition costs between different facility scales, which are not supported by the available data. In contrast to the lecture’s extended framework, where capacity can be interpreted as a decision variable, our model only allows keep-or-close decisions based on historically observed cost tiers. Since no information is available on the costs of moving between facility sizes, such restructuring possibilities are excluded. However, this simplification results in solutions that assign unrealistically high volumes to some small facilities, most notably Guadalajara. We therefore developed a separate capacity-constrained comparison model, which substantially changed the recommended network and ultimately became the basis for our final recommendation. Consequently, the uncapped model should primarily be interpreted as an economic benchmark rather than an operational implementation plan.
+    Third, the primary optimization model deliberately assumes unlimited processing capacity at each cash center and treats center size as fixed rather than as a decision variable. This choice avoids introducing additional assumptions regarding facility resizing, capacity expansion, or transition costs between facility scales, none of which are supported by the available data. In contrast to the lecture's extended framework, where capacity can be interpreted as a decision variable, this model permits only keep-or-close decisions based on historically observed cost tiers. Since no information is available on the cost of moving between facility sizes, such restructuring possibilities are excluded. However, this simplification results in solutions that assign unrealistically high volumes to some small facilities, most notably Guadalajara. A separate capacity-constrained comparison model was therefore developed, which substantially changed the recommended network and ultimately became the basis for the final recommendation. Consequently, the uncapped model should be interpreted primarily as an economic benchmark rather than as an operational implementation plan.
 
-    Fourth, the capacity-constrained comparison model also introduces uncertainty because its volume limits were derived from the uncapped solution instead of observed operational capacities. The chosen threshold (1.5 × the 75th percentile after excluding the identified outlier) serves as a pragmatic calibration rather than a validated engineering limit. While the comparison successfully demonstrates the structural importance of capacity constraints, the exact capacities of individual facilities should be verified before implementation.
+    Fourth, the capacity-constrained comparison model itself introduces uncertainty, since its volume limits were derived from the uncapped solution rather than from observed operational capacities. The chosen threshold (1.5 × the 75th percentile, after excluding the identified outlier) serves as a pragmatic calibration rather than a validated engineering limit. While the comparison successfully demonstrates the structural importance of capacity constraints, the exact capacities of individual facilities should be verified before implementation.
 
-    Fith, the scenario analysis intentionally focuses on a limited number of business drivers: economies of scale, processing-cost assumptions, declining cash demand, rising operating costs, and technological change. Other potentially relevant factors, including regional demand growth, investment costs for facility expansion, relocation costs, workforce availability, regulatory changes, or stochastic disruptions, were outside the scope of this study. Incorporating these aspects would provide an even more comprehensive assessment of long-term network robustness.
+    Fifth, the scenario analysis intentionally focuses on a limited number of business drivers: economies of scale, processing-cost assumptions, declining cash demand, rising operating costs, and technological change. Other potentially relevant factors — including regional demand growth, investment costs for facility expansion, relocation costs, workforce availability, regulatory changes, and stochastic disruptions — were outside the scope of this study. Incorporating these aspects would provide an even more comprehensive assessment of long-term network robustness.
 
-    Sixth, we assume a constant time per stop in our cost formulation. Specifically, stops per shift are modeled as scaling strictly proportionally with usable time, treating minutesPerStop as a constant divisor. In reality, tour efficiency is unlikely to be perfectly linear, as routing density typically improves with higher stop volumes per tour. We nevertheless adopt the simpler proportional specification because minutesPerStop in our data already reflects an empirically averaged, region-specific productivity measure, making a constant-slope approximation a reasonable first-order assumption. A more refined approach would estimate region-specific, potentially non-linear productivity functions from observed tour data, if such data were available.
+    Sixth, a constant time per stop is assumed in the cost formulation. Specifically, stops per shift are modeled as scaling strictly proportionally with usable time, treating minutesPerStop as a constant divisor. In reality, tour efficiency is unlikely to be perfectly linear, as routing density typically improves with a higher number of stops per tour. The simpler proportional specification is nevertheless adopted because minutesPerStop in the data already reflects an empirically averaged, region-specific productivity measure, making a constant-slope approximation a reasonable first-order assumption. A more refined approach would estimate region-specific, potentially non-linear productivity functions from observed tour data, where available.
     """)
     return
 
