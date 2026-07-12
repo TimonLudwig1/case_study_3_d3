@@ -2975,12 +2975,11 @@ def _(
     mo,
     pd,
     realistic_result,
-    run_sensitivity,
     scenario_results,
     sensitivity_runtime,
     summarize_scenario,
 ):
-    mo.stop(not run_sensitivity.value)
+    mo.stop("scenario_results" not in globals())
 
     _summary_rows = [
         summarize_scenario(
@@ -3013,13 +3012,49 @@ def _(
         how="left",
     )
 
-    sensitivity_summary
+    mo.stop("scenario_results" not in globals())
+
+    _summary_rows = [
+        summarize_scenario(
+            "Base case",
+            "Base case",
+            realistic_result,
+            realistic_result,
+        )
+    ]
+
+    for _family, _scenarios in scenario_results.items():
+        for _label, _result in _scenarios.items():
+            _summary_rows.append(
+                summarize_scenario(
+                    _family,
+                    _label,
+                    _result,
+                    realistic_result,
+                )
+            )
+
+    sensitivity_summary = pd.DataFrame(_summary_rows)
+
+    sensitivity_summary = sensitivity_summary.merge(
+        sensitivity_runtime[
+            ["family", "scenario", "runtime_seconds"]
+        ],
+        on=["family", "scenario"],
+        how="left",
+    )
+
+    mo.ui.table(
+        sensitivity_summary,
+        selection=None,
+        pagination=False,
+    )
     return (sensitivity_summary,)
 
 
 @app.cell
-def _(mo, pd, run_sensitivity, sensitivity_summary):
-    mo.stop(not run_sensitivity.value)
+def _(mo, pd, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
 
     _display = sensitivity_summary.copy()
 
@@ -3075,8 +3110,8 @@ def _(mo):
 
 
 @app.cell
-def _(mo, run_sensitivity, sensitivity_summary):
-    mo.stop(not run_sensitivity.value)
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
 
     sensitivity_summary[
         sensitivity_summary["family"].isin(
@@ -3098,15 +3133,64 @@ def _(mo, run_sensitivity, sensitivity_summary):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+    import re
+
+
+    def _tier_count(tier_mix_str, tier):
+        _match = re.search(rf"{tier}:(\d+)", tier_mix_str)
+        return int(_match.group(1)) if _match else 0
+
+
+    _base = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Base case"
+    ].iloc[0]
+
+    _strong = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Strong decline (-30%)"
+    ].iloc[0]
+
+    _severe = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Severe decline (-50%)"
+    ].iloc[0]
+
+    _base_v = _tier_count(_base["tier_mix"], "v")
+    _strong_v = _tier_count(_strong["tier_mix"], "v")
+    _base_m = _tier_count(_base["tier_mix"], "m")
+    _severe_m = _tier_count(_severe["tier_mix"], "m")
+    _severe_h = _tier_count(_severe["tier_mix"], "h")
+
+    mo.md(f"""
     #### Interpretation
 
-    The network downsizes rather than consolidates. Reducing demand by 30 % lowers total cost by 20.0 %, and a 50 % reduction lowers it by 44.1 % — less than proportionally, because fixed facility costs persist regardless of how few customer visits remain.
-    The decisive observation, however, is not in the facility count but in the tier mix. The number of open centers barely moves (25 → 24 → 23), while the size distribution collapses downwards: the smallest tier grows from 1 to 7 locations, and medium-sized centers fall from 14 to 8. Under a 50 % decline, even the single huge center is closed entirely.
-    CashLog's response to declining cash usage is therefore primarily one of downsizing existing facilities, not shutting them down. Geographic coverage remains valuable even at half the demand, because transport cost still scales with distance; what becomes uneconomical is operating large processing capacity that is no longer filled. Nearly half of all customer regions (44.9 % and 51.1 %) are reassigned in the process, indicating that the assignment structure is far more fluid than the facility footprint.
+    The network downsizes rather than consolidates. Reducing demand by
+    30 % lowers total cost by {abs(_strong['cost_change']):.1%}, and a
+    50 % reduction lowers it by {abs(_severe['cost_change']):.1%} — less
+    than proportionally, because fixed facility costs persist regardless
+    of how few customer visits remain.
+
+    The decisive observation, however, is not in the facility count but in
+    the tier mix. The number of open centers barely moves
+    ({_base['n_open']:.0f} → {_strong['n_open']:.0f} →
+    {_severe['n_open']:.0f}), while the size distribution collapses
+    downwards: the smallest tier grows from {_base_v} to {_strong_v}
+    locations, and medium-sized centers fall from {_base_m} to
+    {_severe_m}. Under a 50 % decline, even the single huge center is
+    {'closed entirely' if _severe_h == 0 else f'reduced to {_severe_h}'}.
+
+    CashLog's response to declining cash usage is therefore primarily one
+    of downsizing existing facilities, not shutting them down. Geographic
+    coverage remains valuable even at half the demand, because transport
+    cost still scales with distance; what becomes uneconomical is
+    operating large processing capacity that is no longer filled. Nearly
+    half of all customer regions ({_strong['regions_reassigned']:.1%} and
+    {_severe['regions_reassigned']:.1%}) are reassigned in the process,
+    indicating that the assignment structure is far more fluid than the
+    facility footprint.
     """)
-    return
+    return (re,)
 
 
 @app.cell(hide_code=True)
@@ -3121,8 +3205,8 @@ def _(mo):
 
 
 @app.cell
-def _(mo, run_sensitivity, sensitivity_summary):
-    mo.stop(not run_sensitivity.value)
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
 
     sensitivity_summary[
         sensitivity_summary["family"].isin(
@@ -3144,13 +3228,40 @@ def _(mo, run_sensitivity, sensitivity_summary):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+    _base = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Base case"
+    ].iloc[0]
+
+    _row = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Strong increase (+50%)"
+    ].iloc[0]
+
+    _transport_ratio = _row["transport_cost"] / _base["transport_cost"]
+
+    mo.md(f"""
     #### Interpretation
 
-    Higher transport cost densifies the network. A 50 % increase in shift cost raises total cost by 15.6 % and increases the number of open centers from 25 to 29 — a direct confirmation of the central trade-off: fixed cost buys shorter distances, and when distance becomes more expensive, that purchase becomes worthwhile.
-    The response is visible in the cost structure. Transport cost rises from €56.0M to €80.8M — a factor of 1.44, less than the 1.5 shock applied. The additional facilities absorb part of the increase by shortening average service distances, while fixed cost rises only modestly (€136.9M → €143.5M).
-    Notably, this is the scenario with the largest cost change but the smallest structural change: only 27.4 % of regions are reassigned. The network does not reorganize; it thickens.
+    Higher transport cost densifies the network. A 50 % increase in shift
+    cost raises total cost by {_row['cost_change']:.1%} and increases the
+    number of open centers from {_base['n_open']:.0f} to
+    {_row['n_open']:.0f} — a direct confirmation of the central trade-off:
+    fixed cost buys shorter distances, and when distance becomes more
+    expensive, that purchase becomes worthwhile.
+
+    The response is visible in the cost structure. Transport cost rises
+    from €{_base['transport_cost']/1e6:.1f}M to
+    €{_row['transport_cost']/1e6:.1f}M — a factor of
+    {_transport_ratio:.2f}, less than the 1.5 shock applied. The
+    additional facilities absorb part of the increase by shortening
+    average service distances, while fixed cost rises only modestly
+    (€{_base['fixed_cost']/1e6:.1f}M → €{_row['fixed_cost']/1e6:.1f}M).
+
+    Notably, this is the scenario with the largest cost change but the
+    smallest structural change: only {_row['regions_reassigned']:.1%} of
+    regions are reassigned. The network does not reorganize; it thickens.
     """)
     return
 
@@ -3167,8 +3278,8 @@ def _(mo):
 
 
 @app.cell
-def _(mo, realistic_result, run_sensitivity, scenario_results):
-    mo.stop(not run_sensitivity.value)
+def _(mo, realistic_result, scenario_results):
+    mo.stop("scenario_results" not in globals())
 
     _tech = scenario_results["Technology"][
         "Extended operating time (900 min)"
@@ -3189,8 +3300,8 @@ def _(mo, realistic_result, run_sensitivity, scenario_results):
 
 
 @app.cell
-def _(mo, run_sensitivity, sensitivity_summary):
-    mo.stop(not run_sensitivity.value)
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
 
     sensitivity_summary[
         sensitivity_summary["family"].isin(
@@ -3211,13 +3322,63 @@ def _(mo, run_sensitivity, sensitivity_summary):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, re, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+
+    def _tier_count(tier_mix_str, tier):
+        _match = re.search(rf"{tier}:(\d+)", tier_mix_str)
+        return int(_match.group(1)) if _match else 0
+
+
+    _base = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Base case"
+    ].iloc[0]
+
+    _row = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Extended operating time (900 min)"
+    ].iloc[0]
+
+    _base_s = _tier_count(_base["tier_mix"], "s")
+    _row_s = _tier_count(_row["tier_mix"], "s")
+    _base_m = _tier_count(_base["tier_mix"], "m")
+    _row_m = _tier_count(_row["tier_mix"], "m")
+
+    _other_gaps = sensitivity_summary[
+        ~sensitivity_summary["scenario"].isin(
+            ["Base case", "Extended operating time (900 min)"]
+        )
+    ]["mip_gap"]
+
+    mo.md(f"""
     #### Interpretation
 
-    Longer shifts enable consolidation. Doubling the usable shift to 900 minutes lowers total cost by only 3.1 %, but reduces the number of open centers from 25 to 21 and reassigns 68.3 % of all customer regions — by far the largest structural upheaval of any scenario.
-    The mechanism is the reachability matrix. At 450 minutes, a region is only reachable within 225 minutes of one-way travel; at 900 minutes, that limit doubles. Regions that previously had to be served by a nearby center can now be reached from a distant one, and the round-trip time is amortised over far more stops per shift. The tier mix confirms the consequence: small centers disappear entirely (s: 8 → 0) and medium-sized centers absorb their volume (m: 14 → 17).
-    Interpretive caveat. This scenario is the computationally hardest of the five, because doubling reachability substantially enlarges the model. It terminated with a residual MIP gap of 13.9 %, compared with 2–3 % for all other scenarios. The direction of the effect — technology favours fewer, larger, more distant hubs — is robust, but the specific figures (21 locations, €195.8M) should be treated as indicative rather than precise. A tighter solve would likely find an even lower cost, strengthening rather than reversing the conclusion.
+    Longer shifts enable consolidation. Doubling the usable shift to 900
+    minutes lowers total cost by only {abs(_row['cost_change']):.1%}, but
+    reduces the number of open centers from {_base['n_open']:.0f} to
+    {_row['n_open']:.0f} and reassigns {_row['regions_reassigned']:.1%} of
+    all customer regions, by far the largest structural upheaval of any
+    scenario.
+
+    The mechanism is the reachability matrix. At 450 minutes, a region is
+    only reachable within 225 minutes of one-way travel; at 900 minutes,
+    that limit doubles. Regions that previously had to be served by a
+    nearby center can now be reached from a distant one, and the
+    round-trip time is amortised over far more stops per shift. The tier
+    mix confirms the consequence: small centers disappear entirely (s:
+    {_base_s} to {_row_s}) and medium-sized centers absorb their volume
+    (m: {_base_m} to {_row_m}).
+
+    Interpretive caveat. This scenario is the computationally hardest of
+    the five, because doubling reachability substantially enlarges the
+    model. It terminated with a residual MIP gap of
+    {_row['mip_gap']:.1%}, compared with {_other_gaps.min():.1%} to
+    {_other_gaps.max():.1%} for all other scenarios. The direction of the
+    effect, technology favours fewer, larger, more distant hubs, is
+    robust, but the specific figures ({_row['n_open']:.0f} locations,
+    €{_row['total_cost']/1e6:.1f}M) should be treated as indicative rather
+    than precise. A tighter solve would likely find an even lower cost,
+    strengthening rather than reversing the conclusion.
     """)
     return
 
@@ -3258,15 +3419,39 @@ def _(mo, run_sensitivity, sensitivity_summary):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+    _base = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Base case"
+    ].iloc[0]
+
+    _row = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Full scale effect (alpha=1.0)"
+    ].iloc[0]
+
+    mo.md(f"""
     ### Interpretation
 
-    Cost-robust, structurally fluid. Passing the fixed-cost ratio through undamped (α=1.0\alpha = 1.0
-    α=1.0, a 26.7× per-delivery advantage for the largest tier instead of 5.2×) changes total cost by just −1.0 %. Variable processing cost falls from €9.1M to €5.1M, but because processing accounts for under 5 % of the objective, the total barely moves.
-    The network structure, however, does move: 28 locations instead of 25, eleven facilities flipped, and 34.2 % of regions reassigned. The dampening exponent is therefore not a driver of total cost, but it does shift which specific centers are selected.
-    This is a useful result rather than a problem. It confirms that the base case's headline economics do not depend on the α=0.5\alpha = 0.5
-    α=0.5 assumption, while flagging that individual facility decisions near the margin should not be attributed to the scale assumption alone.
+    Cost-robust, structurally fluid. Passing the fixed-cost ratio through
+    undamped (α = 1.0, a 26.7× per-delivery advantage for the largest
+    tier instead of 5.2×) changes total cost by just
+    {_row['cost_change']:+.1%}. Variable processing cost falls from
+    €{_base['processing_cost']/1e6:.1f}M to
+    €{_row['processing_cost']/1e6:.1f}M, but because processing accounts
+    for under 5 % of the objective, the total barely moves.
+
+    The network structure, however, does move: {_row['n_open']:.0f}
+    locations instead of {_base['n_open']:.0f},
+    {_row['centers_changed']:.0f} facilities flipped, and
+    {_row['regions_reassigned']:.1%} of regions reassigned. The dampening
+    exponent is therefore not a driver of total cost, but it does shift
+    which specific centers are selected.
+
+    This is a useful result rather than a problem. It confirms that the
+    base case's headline economics do not depend on the α = 0.5
+    assumption, while flagging that individual facility decisions near
+    the margin should not be attributed to the scale assumption alone.
     """)
     return
 
@@ -3282,8 +3467,8 @@ def _(mo):
 
 
 @app.cell
-def _(mo, plt, run_sensitivity, sensitivity_summary):
-    mo.stop(not run_sensitivity.value)
+def _(mo, plt, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
 
     _plot_df = sensitivity_summary[
         sensitivity_summary["family"] != "Base case"
@@ -3324,18 +3509,47 @@ def _(mo, plt, run_sensitivity, sensitivity_summary):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+    _transport = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Strong increase (+50%)"
+    ].iloc[0]
+
+    _scale = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Full scale effect (alpha=1.0)"
+    ].iloc[0]
+
+    _tech = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Extended operating time (900 min)"
+    ].iloc[0]
+
+    mo.md(f"""
     ### Interpretation
 
     |Scenario|Cost Change| Reassigned Regions |
     |---|---|---|
-    |Rising transport cost|+15,6 %| 27,4 %
-    |Full scale effect|−1,0 %|34,2 %
-    |Extended operating time| -3,1 %|68,3 %
+    |Rising transport cost|{_transport['cost_change']:+.1%}| {_transport['regions_reassigned']:.1%}
+    |Full scale effect|{_scale['cost_change']:+.1%}|{_scale['regions_reassigned']:.1%}
+    |Extended operating time| {_tech['cost_change']:+.1%}|{_tech['regions_reassigned']:.1%}
 
-    The scatter reveals that cost sensitivity and structural sensitivity are largely decoupled, and in this network even inversely related. The scenario with the largest cost impact (rising transport cost, +15.6 %) produces the least structural change: the network simply thickens along its existing geography. Conversely, the scenarios with almost no cost impact — the scale-effect assumption (−1.0 %) and extended operating time (−3.1 %) — trigger the largest reallocation of customer regions.
-    The practical implication is direct. Forecasting total cost accurately requires getting demand and transport cost right. Deciding which specific centers to close requires getting the technology and capacity assumptions right — and these are precisely the assumptions with the weakest empirical foundation. Cost projections and closure decisions therefore carry different kinds of risk and should not be defended with the same evidence.
+    The scatter reveals that cost sensitivity and structural sensitivity
+    are largely decoupled, and in this network even inversely related.
+    The scenario with the largest cost impact (rising transport cost,
+    {_transport['cost_change']:+.1%}) produces the least structural
+    change: the network simply thickens along its existing geography.
+    Conversely, the scenarios with almost no cost impact, the scale-effect
+    assumption ({_scale['cost_change']:+.1%}) and extended operating time
+    ({_tech['cost_change']:+.1%}), trigger the largest reallocation of
+    customer regions.
+
+    The practical implication is direct. Forecasting total cost accurately
+    requires getting demand and transport cost right. Deciding which
+    specific centers to close requires getting the technology and
+    capacity assumptions right, and these are precisely the assumptions
+    with the weakest empirical foundation. Cost projections and closure
+    decisions therefore carry different kinds of risk and should not be
+    defended with the same evidence.
     """)
     return
 
@@ -3358,10 +3572,9 @@ def _(
     np,
     pd,
     realistic_result,
-    run_sensitivity,
     scenario_results,
 ):
-    mo.stop(not run_sensitivity.value)
+    mo.stop("scenario_results" not in globals())
 
     _external = {
         f: s
@@ -3438,8 +3651,8 @@ def _(
 
 
 @app.cell
-def _(mo, robustness_df, run_sensitivity):
-    mo.stop(not run_sensitivity.value)
+def _(mo, robustness_df):
+    mo.stop("scenario_results" not in globals())
 
     _groups = {
         label: sorted(
@@ -3477,15 +3690,55 @@ def _(mo, robustness_df, run_sensitivity):
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _(mo, sensitivity_summary):
+    mo.stop("scenario_results" not in globals())
+
+    _base = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Base case"
+    ].iloc[0]
+
+    _scale = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Full scale effect (alpha=1.0)"
+    ].iloc[0]
+
+    _severe = sensitivity_summary[
+        sensitivity_summary["scenario"] == "Severe decline (-50%)"
+    ].iloc[0]
+
+    _all_scenarios = sensitivity_summary[
+        sensitivity_summary["scenario"] != "Base case"
+    ]
+    _min_reassigned = _all_scenarios["regions_reassigned"].min()
+    _max_reassigned = _all_scenarios["regions_reassigned"].max()
+
+    mo.md(f"""
     ## 6.9 Conclusion of the Sensitivity Analysis
 
     The sensitivity analysis supports three conclusions.
-    First, the cost projections are robust. Total cost responds predictably and proportionally to the two external factors with a solid empirical basis: demand and transport cost. The internal calibration assumptions (α\alpha
-    α, the processing-cost anchor) move total cost by around one percent and are therefore not material to the business case.
-    Second, the strategic response to declining cash usage is downsizing, not closure. Across a 50 % demand decline, the facility count falls only from 25 to 23, while the size distribution collapses towards the smallest tiers. Geographic coverage retains its value even at halved volume; excess processing capacity does not. This is an operationally very different recommendation from network consolidation, and it is the most decision-relevant finding of the analysis.
-    Third, the facility-level recommendation is considerably less robust than the cost recommendation. Between 27 % and 68 % of customer regions are reassigned depending on the scenario, and no single facility set survives all five scenarios unchanged. The final recommendation must therefore distinguish between the strategic core of the network and locations whose fate depends on assumptions the data cannot settle.
+
+    First, the cost projections are robust. Total cost responds
+    predictably and proportionally to the two external factors with a
+    solid empirical basis: demand and transport cost. The internal
+    calibration assumptions (alpha, the processing-cost anchor) move
+    total cost by around {abs(_scale['cost_change']):.0%} and are
+    therefore not material to the business case.
+
+    Second, the strategic response to declining cash usage is downsizing,
+    not closure. Across a 50 % demand decline, the facility count falls
+    only from {_base['n_open']:.0f} to {_severe['n_open']:.0f}, while the
+    size distribution collapses towards the smallest tiers. Geographic
+    coverage retains its value even at halved volume; excess processing
+    capacity does not. This is an operationally very different
+    recommendation from network consolidation, and it is the most
+    decision-relevant finding of the analysis.
+
+    Third, the facility-level recommendation is considerably less robust
+    than the cost recommendation. Between {_min_reassigned:.0%} and
+    {_max_reassigned:.0%} of customer regions are reassigned depending on
+    the scenario, and no single facility set survives all five scenarios
+    unchanged. The final recommendation must therefore distinguish
+    between the strategic core of the network and locations whose fate
+    depends on assumptions the data cannot settle.
     """)
     return
 
