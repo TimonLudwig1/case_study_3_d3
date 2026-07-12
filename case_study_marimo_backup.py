@@ -2250,7 +2250,7 @@ def _(mo):
 
     Computational note. The calibrated cost structure introduces a 26.7× spread between the smallest and largest tier's fixed cost. This makes every tier decision an economically substantive trade-off — which is the entire point of the extension — but it also weakens the LP relaxation and makes the model considerably harder to solve than a formulation with flatter cost differences. Three modelling refinements were required to obtain a proven optimum: tightening the big-M bound on each location to the total demand of the regions actually reachable from it, pruning tier variables that a location's reachable demand can never fill, and scaling the objective to thousands of euros for numerical stability. With these in place, the model solves to proven optimality in approximately three minutes.
 
-    ### Assignment Summay
+    ### Assignment Summary
     """)
     return
 
@@ -3388,9 +3388,7 @@ def _(mo):
     mo.md(r"""
     ### 6.6 Robustness of the Economies-of-Scale Assumption
 
-    The base case dampens the fixed-cost ratio with α=0.5\alpha = 0.5
-    α=0.5. The extreme case α=1.0\alpha = 1.0
-    α=1.0 passes the observed fixed-cost ratio through to variable processing cost unchanged, making large centers maximally attractive per delivery — a 26.7× advantage for the largest tier instead of 5.2×.
+    The base case dampens the fixed-cost ratio with α=0.5. The extreme case α=1.0 passes the observed fixed-cost ratio through to variable processing cost unchanged, making large centers maximally attractive per delivery — a 26.7× advantage for the largest tier instead of 5.2×.
     If the network survives this, the tier structure does not depend on the dampening assumption, and the base case is safe.
     """)
     return
@@ -3557,7 +3555,7 @@ def _(mo, sensitivity_summary):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 6.8 Robust Recomendation
+    ### 6.8 Robust Recommendation
 
     A location is considered robust when it is open in the base case and remains open across the external scenario families. Families are weighted equally, so a family with more tested values does not dominate.
     """)
