@@ -2189,7 +2189,6 @@ def _(REALISTIC_TYPE_IDS, mo, pd, solve_realistic_network):
     )
 
     realistic_type_counts
-
     return (realistic_result,)
 
 
@@ -3494,39 +3493,71 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 8. Limitations and Conclusion
+    ## 7. Limitations and Conclusion
 
     ### Limitations
 
     1. Transportation costs are based on an aggregate annual shift
-       approximation rather than daily vehicle-routing optimization.
+    approximation rather than daily vehicle-routing optimization.
     2. Individual customers are represented by 515 aggregated customer
-       regions.
+    regions.
     3. The available warehouse data do not contain physical processing
-       capacities.
-    4. The five size categories and their costs originate from the course
-       template and are scenario assumptions.
-    5. The course-template extension assumes that every existing location
-       can technically be resized to any of the five center types.
-    6. It also assumes that the same type-specific cost function applies at
-       every location. Site-specific property, construction, security, labor,
-       and regulatory differences are not available.
-    7. Demand, cost, and technology parameters are deterministic within each
-       scenario.
-    8. Closure costs, employee relocation, contractual obligations,
-       transition periods, and implementation risks are not included.
+    capacities. Fixed cost is used as a size proxy, and the volume
+    bounds of the five capacity tiers are adopted from the course
+    template rather than derived from operational data.
+    4. The variable processing costs are calibrated rather than observed.
+    Their relative scale follows the empirical fixed-cost ratios, but
+    the dampening exponent (α=0.5\alpha = 0.5
+    α=0.5) and the anchor level (15 %
+    of the median transport cost per delivery) are assumptions. Both
+    were examined in the sensitivity analysis; the anchor itself is
+    calibrated once against base-case transport costs and deliberately
+    held fixed across scenarios.
+    5. The upgradeable model assumes that every existing location can
+    technically be resized to any of the five center types, and that
+    the same type-specific cost function applies at every location.
+    Site-specific property, construction, security, labor, and
+    regulatory differences are not available in the data.
+    6. Demand, cost, and technology parameters are deterministic within
+    each scenario. Uncertainty is represented through discrete scenario
+    comparison rather than stochastic modeling.
+    7. The base case is solved to proven optimality, but the sensitivity
+    scenarios are solved with a 1 % relative MIP gap and a 120-second
+    time limit. Residual gaps range from 2.1 % to 13.9 %, with the
+    extended-operating-time scenario being the least precisely solved.
+    Scenario results are therefore read as directional indicators, not
+    as certified optima.
+    8. The calibrated cost structure introduces a 26.7× fixed-cost spread
+    between the smallest and largest tier, which makes the model
+    substantially harder to solve than a formulation with flatter cost
+    differences. This constrained the number of scenarios that could be
+    evaluated within a reasonable computational budget; each scenario
+    family is consequently represented by few, deliberately extreme
+    parameter values rather than a fine grid.
+    9. Closure costs, employee relocation, contractual obligations,
+    transition periods, and implementation risks are not included.
 
     ### Conclusion
 
-    The data-based model identifies the cost-minimizing network under the
-    currently observable transportation and facility costs. The
-    course-template extension tests whether the result remains stable when
-    facility size and volume-dependent processing costs are introduced.
-
-    The final recommendation is therefore based on agreement across model
-    formulations and scenario families rather than on one optimal solution.
-    Robust locations should form the core network, while conditional and
-    scenario-dependent locations require a facility-level capacity and
+    The data-based baseline identifies the cost-minimizing network under
+    the currently observable transportation and facility costs, but it
+    implicitly assumes unlimited processing capacity. The upgradeable
+    extension removes this flaw by making facility size a decision variable
+    with data-calibrated, volume-dependent costs, and solves to a proven
+    optimum of €202.0 million with 25 open locations.
+    The sensitivity analysis shows that this recommendation is cost-robust
+    but only partially structure-robust. Total cost responds predictably to
+    the external factors with a solid empirical basis — demand and
+    transport cost — while the internal calibration assumptions move it by
+    around one percent. The facility-level composition, however, shifts
+    considerably across scenarios, and no single set of locations survives
+    all tested assumptions unchanged.
+    The final recommendation is therefore based on agreement across
+    scenario families rather than on one optimal solution. The robust core
+    of the network should be retained, robust closure candidates should be
+    phased out gradually, and the small group of scenario-dependent
+    locations — most notably those whose base-case status is reversed in
+    every tested scenario — require a facility-level capacity and
     implementation assessment before an irreversible decision is made.
     """)
     return
