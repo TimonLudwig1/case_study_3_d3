@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.13"
+__generated_with = "0.23.9"
 app = marimo.App()
 
 
@@ -532,21 +532,99 @@ def _(mo):
     mo.md(r"""
     ## 5. Network Optimization
 
-    Two optimization models are used.
+    A model cannot be solved without its cost data, so this section first examines the fixed-cost structure of the network, then builds two optimization models on top of it.
 
-    The first model is a data-based baseline. It uses the estimated
-    transportation costs and the existing annual fixed costs from the
-    warehouse data. Because no physical capacity information is available,
-    this model does not impose warehouse-capacity constraints.
+    The first model is a data-based baseline. It uses the estimated transportation costs and the existing annual fixed costs from the warehouse data, with each center treated as a single constant fixed cost. Because no physical capacity information is available, this model does not impose warehouse-capacity constraints.
 
-    The second model applies the stylized capacity and cost function from
-    the course's advanced-analysis notebook. It allows the optimizer to
-    select one of five possible size categories for every existing
-    location. This model is used as a conditional scenario rather than as
-    an estimate of CashLog's actual facility capacities.
+    The second model removes the structural flaw that the baseline still carries. It makes the size of every center a decision, so that each location can be closed or operated at one of five size tiers, each with its own fixed cost, its own variable processing cost per delivery, and its own volume range. The cost figures for these tiers are derived directly from CashLog's own warehouse data.
 
-    The comparison of both models shows how strongly the network
-    recommendation depends on the additional capacity assumptions.
+    The comparison of both models shows how strongly the network recommendation depends on making capacity and volume-dependent processing costs part of the decision.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    ### 5.1 The Fixed-Cost Structure
+
+    Before any model is solved, the fixed-cost data is examined, since it drives both formulations that follow and a model cannot be solved without it. The dataset does not contain a direct measure of each center's physical capacity, so the fixed cost of each warehouse is used as a proxy for its size. Fixed cost is typically driven by square footage, electricity, salaries, and regional price levels, all of which are broadly indicators of physical size.
+    """)
+    return
+
+
+@app.cell
+def _(plt, warehouses_flat):
+    _sorted_costs = (
+        warehouses_flat["fixedCosts"]
+        .sort_values()
+        .reset_index(drop=True)
+    )
+
+    _fig, _ax = plt.subplots(figsize=(7, 4))
+    _ax.plot(
+        range(len(_sorted_costs)),
+        _sorted_costs,
+        marker="o",
+    )
+    _ax.set_xlabel("Warehouses, sorted by fixed cost")
+    _ax.set_ylabel("Fixed cost (€)")
+    _ax.set_title(
+        "Natural breaks in the fixed-cost distribution"
+    )
+    plt.show()
+    return
+
+
+@app.cell
+def _(mo, warehouses_flat):
+    _counts = (
+        warehouses_flat["fixedCosts"]
+        .value_counts()
+        .sort_index()
+    )
+    _n_unique = warehouses_flat["fixedCosts"].nunique()
+
+    _table_rows = "\n".join(
+        f"| €{_cost:,.0f} | {_n} |"
+        for _cost, _n in _counts.items()
+    )
+
+    mo.md(f"""
+    Distinct fixed-cost values: **{_n_unique}**
+
+    | Fixed cost | Number of centers |
+    |---:|---:|
+    {_table_rows}
+
+    Sum of counts: **{_counts.sum()}** of 42 centers.
+    """)
+    return
+
+
+@app.cell
+def _(warehouses_flat):
+    tier_by_fixed_cost = {
+        1_344_000: "v",
+        2_580_000: "s",
+        4_572_000: "m",
+        15_012_000: "l",
+        35_904_000: "h",
+    }
+
+    warehouses_flat["tier"] = warehouses_flat["fixedCosts"].map(tier_by_fixed_cost)
+    warehouses_flat[["warehouseID", "city", "fixedCosts", "tier"]]
+    return (tier_by_fixed_cost,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The gap analysis reveals that all 42 warehouses fall into exactly five distinct fixed-cost levels.
+
+    These results provide strong, data-driven support for using five size tiers. While the two largest tiers each contain only a single warehouse, they are retained as separate categories rather than being merged, since their fixed costs (€15.0M and €35.9M) represent clearly distinct capacity levels rather than minor variation around a common value.
+
+    Each warehouse is mapped to its size tier directly via its fixed-cost value. Since there are exactly five distinct values, this mapping is exact, rather than an approximation or a clustering result with ambiguous boundary cases.
     """)
     return
 
@@ -896,7 +974,7 @@ def _(basic_result, pd, regions_flat, warehouses_flat):
         .reset_index()
         .merge(
             warehouses_flat[
-                ["warehouseID", "city", "fixedCosts"]
+                ["warehouseID", "city", "fixedCosts", "tier"]
             ],
             on="warehouseID",
         )
@@ -913,16 +991,11 @@ def _(basic_result, pd, regions_flat, warehouses_flat):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.2 Baseline Capacity Diagnostic
+    The baseline model identifies the cost-minimizing network under the assumption that every open cash center can process an unlimited amount of demand. Under this assumption, the solver recommends keeping only 18 of the 42 existing locations open while assigning every one of the 515 customer regions to one of these centers.
 
-    The assigned volumes are inspected to identify locations that would
-    require operational validation. A high assigned volume is not treated
-    as proof of infeasibility because the actual processing capacities are
-    unknown.
+    The solution achieves this primarily by reducing fixed facility costs. Since no capacity restrictions exist, there is no disadvantage to concentrating demand in a small number of locations as long as the resulting increase in transportation cost is outweighed by the savings from closing additional cash centers.
 
-    Locations with unusually high assigned demand should therefore be
-    subject to a physical capacity audit before the baseline recommendation
-    is implemented.
+    This behavior is consistent with the mathematical formulation of the model. The optimizer only trades off transportation costs against fixed facility costs, while implicitly assuming unlimited processing capacity at every open location.
     """)
     return
 
@@ -930,89 +1003,719 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 5.3 Course-Template Capacity Extension
+    ### 5.2 Capacity-Constrained Network Model
 
-    The course's advanced-analysis model assumes five possible cash-center
-    types. A location is not permanently tied to one type. Instead, the
-    optimizer decides whether the location is closed or operated as a very
-    small, small, medium, large, or huge center.
+    The baseline model assumes that every open cash center can process an unlimited amount of demand. While this assumption simplifies the optimization problem, it allows the optimizer to concentrate arbitrarily large demand volumes in a small number of facilities.
 
-    The following parameter values are taken from the course template.
-    They are treated as scenario assumptions and are not inferred from
-    CashLog's warehouse data.
+    To obtain an operationally feasible network, the model is extended by introducing explicit capacity limits. Five cash-center tiers are defined, representing increasing processing capacities from very small to huge facilities. Each warehouse location may be assigned to one of these tiers, and the corresponding lower and upper volume bounds ensure that every open facility operates within a realistic capacity range.
+
+    At this stage, the original CashLog fixed costs remain unchanged. The sole purpose of this extension is to isolate the effect of introducing capacity constraints before refining the cost structure in the following section.
     """)
     return
 
 
 @app.cell
-def _(pd):
-    COURSE_CENTER_TYPES = {
+def _(pd, tier_by_fixed_cost, warehouses_flat):
+    # Capacity bounds from the course template.
+    # Each warehouse keeps the tier inferred from its observed fixed cost.
+
+    CAPACITY_BY_TIER = {
         "v": {
             "lower_bound": 0,
             "upper_bound": 19_348,
-            "c_fix": 611_650,
-            "c_var": 4.14,
         },
         "s": {
             "lower_bound": 19_349,
             "upper_bound": 45_415,
-            "c_fix": 860_710,
-            "c_var": 2.85,
         },
         "m": {
             "lower_bound": 45_416,
             "upper_bound": 107_327,
-            "c_fix": 1_451_000,
-            "c_var": 1.55,
         },
         "l": {
             "lower_bound": 107_328,
             "upper_bound": 199_999,
-            "c_fix": 1_451_000,
-            "c_var": 1.55,
         },
         "h": {
             "lower_bound": 200_000,
             "upper_bound": 99_999_999,
-            "c_fix": 1_451_000,
-            "c_var": 1.55,
         },
     }
 
-    COURSE_TYPE_IDS = tuple(
-        COURSE_CENTER_TYPES.keys()
+    # Tier assigned to each warehouse based on its observed fixed-cost level
+    TIER_BY_WAREHOUSE = (
+        warehouses_flat
+        .set_index("warehouseID")["tier"]
+        .to_dict()
     )
 
-    course_type_table = (
-        pd.DataFrame(COURSE_CENTER_TYPES)
+    # Capacity limits for each individual warehouse
+    LOWER_CAPACITY_BY_WAREHOUSE = {
+        warehouse_id: CAPACITY_BY_TIER[tier]["lower_bound"]
+        for warehouse_id, tier in TIER_BY_WAREHOUSE.items()
+    }
+
+    UPPER_CAPACITY_BY_WAREHOUSE = {
+        warehouse_id: CAPACITY_BY_TIER[tier]["upper_bound"]
+        for warehouse_id, tier in TIER_BY_WAREHOUSE.items()
+    }
+
+    # Table for displaying the tier definitions
+    capacity_tier_table = (
+        pd.DataFrame(CAPACITY_BY_TIER)
         .T
+        .rename_axis("tier")
+        .reset_index()
     )
 
-    course_type_table
-    return COURSE_CENTER_TYPES, COURSE_TYPE_IDS
+    capacity_tier_table["fixed_cost"] = (
+        capacity_tier_table["tier"]
+        .map({
+            tier: fixed_cost
+            for fixed_cost, tier in tier_by_fixed_cost.items()
+        })
+    )
+
+    capacity_tier_table = capacity_tier_table[
+        [
+            "tier",
+            "fixed_cost",
+            "lower_bound",
+            "upper_bound",
+        ]
+    ]
+
+    capacity_tier_table
+    return (
+        CAPACITY_BY_TIER,
+        LOWER_CAPACITY_BY_WAREHOUSE,
+        TIER_BY_WAREHOUSE,
+        UPPER_CAPACITY_BY_WAREHOUSE,
+    )
 
 
 @app.cell
 def _(
     BASE_SHIFT_COST,
     BASE_SHIFT_MINUTES,
-    COURSE_CENTER_TYPES,
-    COURSE_TYPE_IDS,
     DEMAND_BY_REGION,
+    FIXED_COST_BY_WAREHOUSE,
+    LOWER_CAPACITY_BY_WAREHOUSE,
     REGION_IDS,
+    TIER_BY_WAREHOUSE,
+    UPPER_CAPACITY_BY_WAREHOUSE,
     WAREHOUSE_IDS,
     build_scenario_links,
     pl,
 ):
-    def solve_course_network(
+    def solve_capacity_network(
         demand_factor=1.0,
         shift_cost=BASE_SHIFT_COST,
         shift_minutes=BASE_SHIFT_MINUTES,
         travel_factor=1.0,
-        processing_cost_factor=1.0,
-        center_fixed_cost_factor=1.0,
+        fixed_cost_factor=1.0,
     ):
-        """Solve the scenario-based network model with flexible center types."""
+        """
+        Solve the capacity-constrained network model.
+
+        Each warehouse keeps the tier inferred from its observed fixed cost.
+        The tier determines its lower and upper volume bounds.
+        The objective still contains only transportation costs and the
+        original CashLog fixed costs.
+        """
+
+        link_data, missing_regions = build_scenario_links(
+            demand_factor=demand_factor,
+            shift_cost=shift_cost,
+            shift_minutes=shift_minutes,
+            travel_factor=travel_factor,
+        )
+
+        if missing_regions:
+            return {
+                "status": "Infeasible: unreachable regions",
+                "missing_regions": missing_regions,
+                "total_cost": None,
+                "transportation_cost": None,
+                "fixed_cost": None,
+                "processing_cost": 0,
+                "n_open": None,
+                "open_centers": [],
+                "selected_type": {},
+                "assigned_volume": {},
+                "assignment": [],
+                "link_data": link_data,
+                "mip_gap": float("nan"),
+            }
+
+        link_keys = list(
+            zip(
+                link_data["warehouseID"],
+                link_data["regionID"],
+            )
+        )
+
+        links_by_region = {
+            region_id: []
+            for region_id in REGION_IDS
+        }
+
+        links_by_center = {
+            warehouse_id: []
+            for warehouse_id in WAREHOUSE_IDS
+        }
+
+        for warehouse_id, region_id in link_keys:
+            links_by_region[region_id].append(
+                warehouse_id
+            )
+            links_by_center[warehouse_id].append(
+                region_id
+            )
+
+        transport_cost_lookup = (
+            link_data
+            .set_index(["warehouseID", "regionID"])[
+                "transportationCosts"
+            ]
+            .to_dict()
+        )
+
+        scenario_demand = {
+            region_id: (
+                DEMAND_BY_REGION[region_id]
+                * demand_factor
+            )
+            for region_id in REGION_IDS
+        }
+
+        model = pl.LpProblem(
+            "CashLog_Capacity_Model",
+            pl.LpMinimize,
+        )
+
+        x_capacity = pl.LpVariable.dicts(
+            "x_capacity",
+            link_keys,
+            cat=pl.LpBinary,
+        )
+
+        y_capacity = pl.LpVariable.dicts(
+            "y_capacity",
+            WAREHOUSE_IDS,
+            cat=pl.LpBinary,
+        )
+
+        transportation_expression = pl.lpSum(
+            transport_cost_lookup[
+                (warehouse_id, region_id)
+            ]
+            * x_capacity[
+                (warehouse_id, region_id)
+            ]
+            for warehouse_id, region_id in link_keys
+        )
+
+        fixed_cost_expression = pl.lpSum(
+            FIXED_COST_BY_WAREHOUSE[warehouse_id]
+            * fixed_cost_factor
+            * y_capacity[warehouse_id]
+            for warehouse_id in WAREHOUSE_IDS
+        )
+
+        model += (
+            transportation_expression
+            + fixed_cost_expression
+        )
+
+        # A region may only be assigned to an open warehouse
+        for warehouse_id, region_id in link_keys:
+            model += (
+                x_capacity[
+                    (warehouse_id, region_id)
+                ]
+                <= y_capacity[warehouse_id]
+            )
+
+        # Every region must be assigned to exactly one reachable warehouse
+        for region_id in REGION_IDS:
+            model += pl.lpSum(
+                x_capacity[
+                    (warehouse_id, region_id)
+                ]
+                for warehouse_id
+                in links_by_region[region_id]
+            ) == 1
+
+        # Assigned volume must remain within the bounds of the
+        # warehouse's fixed, data-derived tier
+        for warehouse_id in WAREHOUSE_IDS:
+
+            assigned_volume_expression = pl.lpSum(
+                scenario_demand[region_id]
+                * x_capacity[
+                    (warehouse_id, region_id)
+                ]
+                for region_id
+                in links_by_center[warehouse_id]
+            )
+
+            model += (
+                assigned_volume_expression
+                >= LOWER_CAPACITY_BY_WAREHOUSE[warehouse_id]
+                * y_capacity[warehouse_id]
+            )
+
+            model += (
+                assigned_volume_expression
+                <= UPPER_CAPACITY_BY_WAREHOUSE[warehouse_id]
+                * y_capacity[warehouse_id]
+            )
+
+        available_solvers = pl.listSolvers(
+            onlyAvailable=True
+        )
+
+        if "HiGHS" not in available_solvers:
+            raise RuntimeError(
+                "HiGHS is not available. "
+                "Install it with: pip install highspy"
+            )
+
+        model.solve(
+            pl.HiGHS(msg=False)
+        )
+
+        status_name = pl.LpStatus[
+            model.status
+        ]
+
+        if status_name != "Optimal":
+            return {
+                "status": status_name,
+                "missing_regions": [],
+                "total_cost": None,
+                "transportation_cost": None,
+                "fixed_cost": None,
+                "processing_cost": 0,
+                "n_open": None,
+                "open_centers": [],
+                "selected_type": {},
+                "assigned_volume": {},
+                "assignment": [],
+                "link_data": link_data,
+            }
+
+        open_centers = [
+            warehouse_id
+            for warehouse_id in WAREHOUSE_IDS
+            if (
+                y_capacity[warehouse_id].value()
+                or 0
+            ) > 0.5
+        ]
+
+        selected_type = {
+            warehouse_id: TIER_BY_WAREHOUSE[warehouse_id]
+            for warehouse_id in open_centers
+        }
+
+        assigned_volume = {
+            warehouse_id: sum(
+                scenario_demand[region_id]
+                * (
+                    x_capacity[
+                        (warehouse_id, region_id)
+                    ].value()
+                    or 0
+                )
+                for region_id
+                in links_by_center[warehouse_id]
+            )
+            for warehouse_id in open_centers
+        }
+
+        assignment = [
+            (warehouse_id, region_id)
+            for warehouse_id, region_id in link_keys
+            if (
+                x_capacity[
+                    (warehouse_id, region_id)
+                ].value()
+                or 0
+            ) > 0.5
+        ]
+
+        return {
+            "status": status_name,
+            "missing_regions": [],
+            "total_cost": pl.value(
+                model.objective
+            ),
+            "transportation_cost": pl.value(
+                transportation_expression
+            ),
+            "fixed_cost": pl.value(
+                fixed_cost_expression
+            ),
+            "processing_cost": 0,
+            "n_open": len(open_centers),
+            "open_centers": open_centers,
+            "selected_type": selected_type,
+            "assigned_volume": assigned_volume,
+            "assignment": assignment,
+            "link_data": link_data,
+        }
+
+    return (solve_capacity_network,)
+
+
+@app.cell
+def _(mo, pd, solve_capacity_network):
+    capacity_result = solve_capacity_network()
+
+    mo.stop(
+        capacity_result["status"] != "Optimal",
+        mo.md(
+            f"Capacity-model status: "
+            f"**{capacity_result['status']}**"
+        ),
+    )
+
+    capacity_type_counts = (
+        pd.Series(
+            capacity_result["selected_type"],
+            name="tier",
+        )
+        .value_counts()
+        .sort_index()
+    )
+
+    capacity_type_counts
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Initial result
+
+    The capacity-constrained model is infeasible. Since every customer region has already been verified to have at least one reachable cash center, infeasibility cannot be explained by the reachability constraints alone.
+
+    We therefore investigate whether the newly introduced capacity limits are responsible. Specifically, we check whether every customer region can be fully assigned to at least one reachable cash center without violating its maximum processing capacity.
+    """)
+    return
+
+
+@app.cell
+def _(
+    DEMAND_BY_REGION,
+    TIER_BY_WAREHOUSE,
+    UPPER_CAPACITY_BY_WAREHOUSE,
+    build_scenario_links,
+    regions_flat,
+):
+    # Diagnose: Kann jede Region vollständig von mindestens einem
+    # erreichbaren Warehouse innerhalb dessen Kapazität übernommen werden?
+
+    base_link_data, missing_regions = build_scenario_links()
+
+    reachable_capacity_check = (
+        base_link_data[
+            ["warehouseID", "regionID"]
+        ]
+        .assign(
+            warehouse_tier=lambda df:
+                df["warehouseID"].map(TIER_BY_WAREHOUSE),
+            warehouse_capacity=lambda df:
+                df["warehouseID"].map(
+                    UPPER_CAPACITY_BY_WAREHOUSE
+                ),
+            region_demand=lambda df:
+                df["regionID"].map(DEMAND_BY_REGION),
+        )
+    )
+
+    reachable_capacity_check["can_serve_region"] = (
+        reachable_capacity_check["warehouse_capacity"]
+        >= reachable_capacity_check["region_demand"]
+    )
+
+    region_capacity_diagnostic = (
+        reachable_capacity_check
+        .groupby("regionID")
+        .agg(
+            region_demand=("region_demand", "first"),
+            n_reachable_centers=("warehouseID", "nunique"),
+            max_reachable_capacity=(
+                "warehouse_capacity",
+                "max",
+            ),
+            n_capacity_feasible_centers=(
+                "can_serve_region",
+                "sum",
+            ),
+        )
+        .reset_index()
+    )
+
+    infeasible_regions = (
+        region_capacity_diagnostic[
+            region_capacity_diagnostic[
+                "n_capacity_feasible_centers"
+            ] == 0
+        ]
+        .merge(
+            regions_flat[
+                ["regionID", "city", "yearlyDemand"]
+            ],
+            on="regionID",
+            how="left",
+        )
+        .sort_values(
+            "region_demand",
+            ascending=False,
+        )
+    )
+
+    infeasible_regions
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Diagnosing the infeasibility
+
+    The analysis reveals that the infeasibility is indeed caused by the capacity constraints rather than by the optimization algorithm.
+
+    For example, customer region 410 (Zaragoza) has an annual demand of 59,646 deliveries. However, the largest reachable cash center has a maximum capacity of only 45,415 deliveries. Since each region must be assigned entirely to a single cash center, no feasible assignment exists.
+
+    This is not an isolated modeling error but a consequence of combining two assumptions that were not originally intended to be used together.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 5.3 A Data-Driven Capacity and Cost Model
+
+    The infeasibility of the previous formulation highlights an important limitation. Capacity bounds alone are insufficient when each warehouse is permanently tied to its observed size. In practice, however, CashLog is not restricted to operating every location at its current scale. Existing facilities can be expanded or downsized through investments in equipment, workforce, and infrastructure.
+
+    We therefore extend the model by allowing the optimizer to determine not only which cash centers remain open, but also at which operational size they should be operated. Each location may be assigned to one of five capacity tiers, thereby restoring the flexibility required for the capacity bounds to function as intended.
+
+    Unlike the original course template, however, the associated cost structure is not adopted directly. Instead, the fixed and variable processing costs of each tier are calibrated from the observed CashLog fixed-cost data. This calibration preserves the empirically observed cost differences between facilities while introducing economies of scale through a volume-dependent processing-cost component.
+
+    The resulting model simultaneously determines
+
+    * which locations remain open,
+    * which operational size each open location should adopt,
+    * how customer regions are assigned, and
+    * the corresponding transportation and processing costs.
+
+    Compared with the baseline formulation, this model provides a substantially more realistic representation of CashLog’s operational decision problem, as it combines geographical assignment, capacity planning, and economies of scale within a single optimization framework.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Variable Processing Cost
+
+    Having established that fixed warehouse tiers alone lead to an infeasible model, we now extend the formulation by allowing each location to operate at different capacity levels. This requires assigning realistic fixed and variable processing costs to every tier. While the fixed costs are directly calibrated from the observed CashLog data, the variable processing costs must be derived separately, as they are not available in the dataset.
+
+    Rather than assigning arbitrary processing costs to each tier, we derive all values from a single data-driven anchor. The observed fixed-cost ratios between tiers determine their relative scale, while a dampening function models the expected economies of scale.
+
+    Note the unit: $c_t^{var}$ denotes cost *per individual customer visit*, not per shift or per tour — unlike $c_{ij}$, which already aggregates many visits into a single shift cost.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    fixed_by_tier = {"v": 1_344_000, "s": 2_580_000, "m": 4_572_000, "l": 15_012_000, "h": 35_904_000}
+    scale_factor = {t: f / fixed_by_tier["v"] for t, f in fixed_by_tier.items()}
+
+    _rows = "\n".join(
+        f"| {t} | €{fixed_by_tier[t]:,.0f} | {s:.2f}x |"
+        for t, s in scale_factor.items()
+    )
+
+    mo.md(f"""
+    | Tier | Fixed cost | Scaling factor (relative to "v") |
+    |---|---:|---:|
+    {_rows}
+    """)
+    return fixed_by_tier, scale_factor
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The smallest warehouse tier (v) is used as the reference tier, with a scaling factor of 1.0. The scaling factors for the remaining tiers are obtained by dividing each tier's fixed cost by that of the smallest tier, yielding a relative measure of size across all tiers.
+
+
+    ### Dampening the Scaling Effect
+
+    Having derived the fixed-cost ratios between tiers, we now determine how strongly variable cost per delivery should decrease as warehouse size increases. A one-to-one translation of the fixed-cost ratio into variable cost savings would be unrealistically strong. While fixed costs primarily reflect investments in capacity (e.g., warehouse space, equipment, and security infrastructure), operational efficiencies per delivery are subject to physical and organizational limits and therefore cannot improve proportionally with warehouse size. To account for this, the scaling effect is dampened rather than applying the fixed-cost ratios directly, representing economies of scale in a more realistic manner. This approach intentionally separates the relative cost differences between tiers from the absolute processing-cost level. The relative differences are determined by the observed fixed-cost ratios, whereas the absolute level is calibrated afterwards using the transport-cost data.
+
+    This is implemented using a power function. Let $s_t$ denote the fixed-cost scaling factor of tier $t$ relative to the smallest warehouse tier. The variable processing cost per delivery is then calculated as
+
+    $$c_t^{var} = c_v^{var} \cdot s_t^{-\alpha}$$
+
+    where $c_v^{var}$ is the variable processing cost per delivery of the reference tier, and $\alpha$ is the dampening exponent. The parameter $\alpha$ controls the strength of the economies of scale: $\alpha = 0$ implies no scaling effect at all, $\alpha = 1$ applies the fixed-cost ratio directly, and intermediate values produce a more moderate, plausible reduction. Since $\alpha$ is the only free parameter of the function and has a clear interpretation, it can be systematically varied in the sensitivity analysis to assess the robustness of the model.
+
+    We set $\alpha = 0.5$ (square-root dampening) as our base case, representing a moderate and commonly used degree of scale sensitivity — strong enough to reflect real economies of scale, but far short of a full 1:1 translation of the fixed-cost ratio. $\alpha$ is treated as an explicit assumption and varied later in the sensitivity analysis.
+
+    ### Deriving $c_v^{var}$
+
+    The scaled variable processing costs depend on the initial reference value $c_v^{var}$, which must therefore be a sensible and defensible figure. $c_v^{var}$ is initialized using our own transport cost as an internal reference point: for each reachable link, the transport cost per individual delivery ($c_{ij}/\text{yearlyDemand}_j$) can be computed.
+
+    In-house processing (counting, sorting) requires no vehicle or fuel, and plausibly less staff time per delivery than a driven tour stop, so it is expected to cost less than transport per delivery. $c_v^{var}$ is therefore set at a sensible fraction of the median transport-per-delivery figure. The percentage itself remains an assumption, since no data separates processing labor from transport labor, but the anchor point it scales from is fully derived from our own data rather than an external or invented number. The impact of this assumption is examined later in the sensitivity analysis.
+    """)
+    return
+
+
+@app.cell
+def _(mo, scale_factor):
+    damp_scale_factor = {t: f ** (-0.5) for t, f in scale_factor.items()}
+
+    _rows = "\n".join(
+        f"| {t} | {scale_factor[t]:.2f}x | {s:.3f} |"
+        for t, s in damp_scale_factor.items()
+    )
+
+    mo.md(f"""
+    | Tier | Fixed-cost scaling factor | Dampened factor ($s_t^{{-0.5}}$) |
+    |---|---:|---:|
+    {_rows}
+    """)
+    return
+
+
+@app.cell
+def _(cost_base, mo, regions_flat):
+    merged = cost_base.merge(regions_flat[["regionID", "yearlyDemand"]], on="regionID")
+    merged["per_delivery_transport_cost"] = merged["transportationCosts"] / merged["yearlyDemand"]
+
+    _stats = merged["per_delivery_transport_cost"].describe()
+
+    mo.md(f"""
+    Per-delivery transport cost (`transportationCosts / yearlyDemand`):
+
+    | Statistic | Value |
+    |---|---:|
+    | Count | {_stats['count']:.0f} |
+    | Mean | €{_stats['mean']:.2f} |
+    | Std | €{_stats['std']:.2f} |
+    | Min | €{_stats['min']:.2f} |
+    | 25% | €{_stats['25%']:.2f} |
+    | Median (50%) | €{_stats['50%']:.2f} |
+    | 75% | €{_stats['75%']:.2f} |
+    | Max | €{_stats['max']:.2f} |
+    """)
+    return (merged,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The median transport cost per delivery across all 2,661 reachable links is €47.12. In-house processing cost is estimated at roughly **15%** of this transport-per-delivery figure, reflecting that the bulk of a transport stop's cost consists of driving and logistics overhead rather than the few minutes of actual cash handling. This gives:
+
+    $$c_v^{var} = 0.15 \times 47.12\,\text{€} \approx 7.07\,\text{€ per delivery}$$
+
+    The scaled processing costs can now be calculated accordingly.
+    """)
+    return
+
+
+@app.cell
+def _(merged, mo, scale_factor):
+    alpha = 0.5       # dampening exponent
+    median_transport_per_delivery = merged["per_delivery_transport_cost"].median()
+    processing_share = 0.15  # Anteil der Transport-pro-Lieferung-Kosten
+    c_var_anchor = processing_share * median_transport_per_delivery
+
+    c_var_by_tier = {t: c_var_anchor / (scale_factor[t] ** alpha) for t in scale_factor}
+
+    _rows = "\n".join(f"| {t} | €{c:.2f} |" for t, c in c_var_by_tier.items())
+
+    mo.md(f"""
+    Anchor value $c_v^{{var}}$ (15% of median transport-per-delivery, €{median_transport_per_delivery:.2f}): **€{c_var_anchor:.2f} per delivery**
+
+    | Tier | Variable processing cost $c_t^{{var}}$ |
+    |---|---:|
+    {_rows}
+    """)
+    return c_var_by_tier, median_transport_per_delivery
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The resulting variable processing costs range from €7.07 per delivery for the smallest tier down to €1.37 for the largest — a 5.17x reduction, matching $\sqrt{s_h} \approx 5.17$ as expected under $\alpha = 0.5$. This is substantially smaller than the 26.7x difference in fixed costs between the same two tiers, confirming that the dampening meaningfully moderates the raw fixed-cost ratio rather than passing it through unchanged. All values remain well below the median transport cost per delivery (€47.12), consistent with in-house processing being cheaper per unit than a driven tour stop.
+
+    The derived variable processing costs are combined with the calibrated fixed-cost structure in the following section to formulate the final upgradeable CashLog optimization model.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Solving the model
+    """)
+    return
+
+
+@app.cell
+def _(
+    BASE_SHIFT_COST,
+    BASE_SHIFT_MINUTES,
+    CAPACITY_BY_TIER,
+    DEMAND_BY_REGION,
+    REGION_IDS,
+    WAREHOUSE_IDS,
+    build_scenario_links,
+    fixed_by_tier,
+    median_transport_per_delivery,
+    pl,
+    scale_factor,
+):
+    REALISTIC_TYPE_IDS = tuple(
+        CAPACITY_BY_TIER.keys()
+    )
+
+
+    def solve_realistic_network(
+        demand_factor=1.0,
+        shift_cost=BASE_SHIFT_COST,
+        shift_minutes=BASE_SHIFT_MINUTES,
+        travel_factor=1.0,
+        fixed_cost_factor=1.0,
+        processing_cost_factor=1.0,
+        alpha=0.5,
+        processing_share=0.15,
+        warm_start_from=None,
+        gap_rel=0.005,
+        time_limit=300,
+    ):
+        """
+        Solve the upgradeable CashLog network model.
+
+        For every warehouse location, the optimizer decides whether the
+        location remains closed or operates as one of five size tiers.
+
+        The objective includes:
+        1. annual transportation costs,
+        2. tier-specific fixed costs,
+        3. tier-specific variable processing costs.
+
+        Each selected tier imposes corresponding lower and upper
+        volume bounds.
+        """
 
         link_data, missing_regions = build_scenario_links(
             demand_factor=demand_factor,
@@ -1047,7 +1750,7 @@ def _(
         type_keys = [
             (warehouse_id, center_type)
             for warehouse_id in WAREHOUSE_IDS
-            for center_type in COURSE_TYPE_IDS
+            for center_type in REALISTIC_TYPE_IDS
         ]
 
         links_by_region = {
@@ -1070,8 +1773,9 @@ def _(
 
         transport_cost_lookup = (
             link_data
-            .set_index(["warehouseID", "regionID"])
-            ["transportationCosts"]
+            .set_index(
+                ["warehouseID", "regionID"]
+            )["transportationCosts"]
             .to_dict()
         )
 
@@ -1083,152 +1787,225 @@ def _(
             for region_id in REGION_IDS
         }
 
+        # Recalculate tier-specific variable processing costs
+        # for the current sensitivity scenario.
+
+        scenario_c_var_anchor = (
+            processing_share
+            * median_transport_per_delivery
+        )
+
+        scenario_c_var_by_tier = {
+            center_type: (
+                scenario_c_var_anchor
+                / (
+                    scale_factor[center_type]
+                    ** alpha
+                )
+            )
+            for center_type in REALISTIC_TYPE_IDS
+        }
+
         total_scenario_demand = sum(
             scenario_demand.values()
         )
 
         model = pl.LpProblem(
-            "CashLog_Course_Extension",
+            "CashLog_Realistic_Upgradeable_Model",
             pl.LpMinimize,
         )
 
-        x_course = pl.LpVariable.dicts(
-            "x_course",
+        # 1 if region j is assigned to warehouse i
+        x_realistic = pl.LpVariable.dicts(
+            "x_realistic",
             link_keys,
             cat=pl.LpBinary,
         )
 
-        y_course = pl.LpVariable.dicts(
-            "y_course",
+        # 1 if warehouse i operates as tier t
+        y_realistic = pl.LpVariable.dicts(
+            "y_realistic",
             type_keys,
             cat=pl.LpBinary,
         )
 
-        z_course = pl.LpVariable.dicts(
-            "z_course",
+        # Volume processed by warehouse i under tier t
+        z_realistic = pl.LpVariable.dicts(
+            "z_realistic",
             type_keys,
             lowBound=0,
             cat=pl.LpContinuous,
         )
 
+        # ---------------------------------------------------------
+        # Objective-function components
+        # ---------------------------------------------------------
+
         transportation_expression = pl.lpSum(
             transport_cost_lookup[
                 (warehouse_id, region_id)
             ]
-            * x_course[
+            * x_realistic[
                 (warehouse_id, region_id)
             ]
             for warehouse_id, region_id in link_keys
         )
 
         center_fixed_expression = pl.lpSum(
-            COURSE_CENTER_TYPES[
-                center_type
-            ]["c_fix"]
-            * center_fixed_cost_factor
-            * y_course[
+            fixed_by_tier[center_type]
+            * fixed_cost_factor
+            * y_realistic[
                 (warehouse_id, center_type)
             ]
             for warehouse_id in WAREHOUSE_IDS
-            for center_type in COURSE_TYPE_IDS
+            for center_type in REALISTIC_TYPE_IDS
         )
 
         processing_expression = pl.lpSum(
-            COURSE_CENTER_TYPES[
-                center_type
-            ]["c_var"]
+            scenario_c_var_by_tier[center_type]
             * processing_cost_factor
-            * z_course[
+            * z_realistic[
                 (warehouse_id, center_type)
             ]
             for warehouse_id in WAREHOUSE_IDS
-            for center_type in COURSE_TYPE_IDS
+            for center_type in REALISTIC_TYPE_IDS
         )
+        # print("Old:")
+        # print(c_var_by_tier)
+
+        # print("\nNew:")
+        # print(scenario_c_var_by_tier)
+
+        OBJECTIVE_SCALE = 1_000
 
         model += (
             transportation_expression
             + center_fixed_expression
             + processing_expression
-        )
+        ) / OBJECTIVE_SCALE
 
+        # ---------------------------------------------------------
+        # Assignment constraints
+        # ---------------------------------------------------------
+
+        # A region can only be assigned to an open warehouse
         for warehouse_id, region_id in link_keys:
             model += (
-                x_course[
+                x_realistic[
                     (warehouse_id, region_id)
                 ]
                 <= pl.lpSum(
-                    y_course[
+                    y_realistic[
                         (warehouse_id, center_type)
                     ]
-                    for center_type in COURSE_TYPE_IDS
+                    for center_type in REALISTIC_TYPE_IDS
                 )
             )
 
+        # Every region must be assigned to exactly one reachable warehouse
         for region_id in REGION_IDS:
             model += pl.lpSum(
-                x_course[
+                x_realistic[
                     (warehouse_id, region_id)
                 ]
                 for warehouse_id
                 in links_by_region[region_id]
             ) == 1
 
+        # ---------------------------------------------------------
+        # Tier-selection and capacity constraints
+        # ---------------------------------------------------------
+
+        # Tighter big-M: a warehouse can never receive more volume than the
+        # total demand of the regions actually reachable from it.
+        reachable_demand_by_center = {
+            warehouse_id: sum(
+                scenario_demand[region_id]
+                for region_id in links_by_center[warehouse_id]
+            )
+            for warehouse_id in WAREHOUSE_IDS
+        }
+
         for warehouse_id in WAREHOUSE_IDS:
 
-            model += pl.lpSum(
-                z_course[
-                    (warehouse_id, center_type)
-                ]
-                for center_type in COURSE_TYPE_IDS
-            ) == pl.lpSum(
+            assigned_volume_expression = pl.lpSum(
                 scenario_demand[region_id]
-                * x_course[
+                * x_realistic[
                     (warehouse_id, region_id)
                 ]
                 for region_id
                 in links_by_center[warehouse_id]
             )
 
+            # Total warehouse volume must equal the volume allocated
+            # to its selected tier
             model += pl.lpSum(
-                y_course[
+                z_realistic[
                     (warehouse_id, center_type)
                 ]
-                for center_type in COURSE_TYPE_IDS
+                for center_type in REALISTIC_TYPE_IDS
+            ) == assigned_volume_expression
+
+            # Each location may operate as at most one tier
+            model += pl.lpSum(
+                y_realistic[
+                    (warehouse_id, center_type)
+                ]
+                for center_type in REALISTIC_TYPE_IDS
             ) <= 1
 
-            for center_type in COURSE_TYPE_IDS:
-                model += (
-                    z_course[
-                        (warehouse_id, center_type)
-                    ]
-                    >= (
-                        COURSE_CENTER_TYPES[
-                            center_type
-                        ]["lower_bound"]
-                        * y_course[
-                            (warehouse_id, center_type)
-                        ]
-                    )
+            for center_type in REALISTIC_TYPE_IDS:
+
+                lower_bound = (
+                    CAPACITY_BY_TIER[
+                        center_type
+                    ]["lower_bound"]
                 )
 
-                effective_upper_bound = min(
-                    COURSE_CENTER_TYPES[
+                upper_bound = min(
+                    CAPACITY_BY_TIER[
                         center_type
                     ]["upper_bound"],
-                    total_scenario_demand,
+                    reachable_demand_by_center[warehouse_id],
                 )
 
+                # A warehouse whose reachable demand cannot even fill this
+                # tier's lower bound can never operate at this tier.
+                if (
+                    reachable_demand_by_center[warehouse_id]
+                    < lower_bound
+                ):
+                    model += (
+                        y_realistic[
+                            (warehouse_id, center_type)
+                        ] == 0
+                    )
+
+                # Lower volume bound applies only if the tier is selected
                 model += (
-                    z_course[
+                    z_realistic[
                         (warehouse_id, center_type)
                     ]
-                    <= (
-                        effective_upper_bound
-                        * y_course[
-                            (warehouse_id, center_type)
-                        ]
-                    )
+                    >= lower_bound
+                    * y_realistic[
+                        (warehouse_id, center_type)
+                    ]
                 )
+
+                # Upper capacity applies only if the tier is selected
+                model += (
+                    z_realistic[
+                        (warehouse_id, center_type)
+                    ]
+                    <= upper_bound
+                    * y_realistic[
+                        (warehouse_id, center_type)
+                    ]
+                )
+
+        # ---------------------------------------------------------
+        # Solve
+        # ---------------------------------------------------------
 
         available_solvers = pl.listSolvers(
             onlyAvailable=True
@@ -1240,9 +2017,51 @@ def _(
                 "Install it with: pip install highspy"
             )
 
+        # ---------------------------------------------------------
+        # Warm start: seed the solver with a known good solution.
+        # Scenarios stay structurally close to the base case, so the
+        # base solution is a strong incumbent and saves the solver the
+        # initial search for any feasible solution at all.
+        # ---------------------------------------------------------
+        if warm_start_from is not None:
+            seed_type = warm_start_from["selected_type"]
+            seed_assignment = set(warm_start_from["assignment"])
+
+            for warehouse_id, center_type in type_keys:
+                y_realistic[
+                    (warehouse_id, center_type)
+                ].setInitialValue(
+                    1 if seed_type.get(warehouse_id) == center_type
+                    else 0
+                )
+
+            for warehouse_id, region_id in link_keys:
+                x_realistic[
+                    (warehouse_id, region_id)
+                ].setInitialValue(
+                    1 if (warehouse_id, region_id) in seed_assignment
+                    else 0
+                )
+
         model.solve(
-            pl.HiGHS(msg=False)
+            pl.HiGHS(
+                msg=False,
+                gapRel=gap_rel,
+                timeLimit=time_limit,
+                warmStart=warm_start_from is not None,
+            )
         )
+
+        # Capture the residual MIP gap so scenario precision is reported,
+        # not assumed.
+        try:
+            _info = model.solverModel.getInfo()
+            mip_gap = float(_info.mip_gap)
+        except Exception:
+            mip_gap = float("nan")
+
+        print("HiGHS status:", model.solverModel.getModelStatus()
+          if hasattr(model, "solverModel") else "n/a")
 
         status_name = pl.LpStatus[
             model.status
@@ -1262,16 +2081,21 @@ def _(
                 "assigned_volume": {},
                 "assignment": [],
                 "link_data": link_data,
+                "mip_gap": mip_gap,
             }
+
+        # ---------------------------------------------------------
+        # Extract solution
+        # ---------------------------------------------------------
 
         selected_type = {}
 
         for warehouse_id in WAREHOUSE_IDS:
             chosen_types = [
                 center_type
-                for center_type in COURSE_TYPE_IDS
+                for center_type in REALISTIC_TYPE_IDS
                 if (
-                    y_course[
+                    y_realistic[
                         (warehouse_id, center_type)
                     ].value()
                     or 0
@@ -1290,12 +2114,12 @@ def _(
         assigned_volume = {
             warehouse_id: sum(
                 (
-                    z_course[
+                    z_realistic[
                         (warehouse_id, center_type)
                     ].value()
                     or 0
                 )
-                for center_type in COURSE_TYPE_IDS
+                for center_type in REALISTIC_TYPE_IDS
             )
             for warehouse_id in open_centers
         }
@@ -1304,7 +2128,7 @@ def _(
             (warehouse_id, region_id)
             for warehouse_id, region_id in link_keys
             if (
-                x_course[
+                x_realistic[
                     (warehouse_id, region_id)
                 ].value()
                 or 0
@@ -1314,8 +2138,8 @@ def _(
         return {
             "status": status_name,
             "missing_regions": [],
-            "total_cost": pl.value(
-                model.objective
+            "total_cost": (
+                pl.value(model.objective) * OBJECTIVE_SCALE
             ),
             "transportation_cost": pl.value(
                 transportation_expression
@@ -1332,213 +2156,501 @@ def _(
             "assigned_volume": assigned_volume,
             "assignment": assignment,
             "link_data": link_data,
+            "mip_gap": mip_gap,
         }
 
-    return (solve_course_network,)
+    return REALISTIC_TYPE_IDS, solve_realistic_network
 
 
 @app.cell
-def _(mo, pd, solve_course_network):
-    course_result = solve_course_network()
+def _(REALISTIC_TYPE_IDS, mo, pd, solve_realistic_network):
+    realistic_result = solve_realistic_network()
 
     mo.stop(
-        course_result["status"] != "Optimal",
+        realistic_result["status"] != "Optimal",
         mo.md(
-            f"Course-extension status: "
-            f"**{course_result['status']}**"
+            f"Realistic-model status: "
+            f"**{realistic_result['status']}**"
         ),
     )
 
-    course_type_counts = (
-        pd.Series(course_result["selected_type"])
+    realistic_type_counts = (
+        pd.Series(
+            realistic_result["selected_type"],
+            name="center_type",
+        )
         .value_counts()
-        .sort_index()
+        .reindex(
+            REALISTIC_TYPE_IDS,
+            fill_value=0,
+        )
+        .rename_axis("Center type")
+        .reset_index(name="Number of centers")
     )
-    return (course_result,)
+
+    realistic_type_counts
+
+    return (realistic_result,)
 
 
 @app.cell
-def _(course_result, mo, pd):
-    if course_result["status"] != "Optimal":
-        mo.md(
-            f"""
-    ### Course-Template Extension Results
+def _(CITY_BY_WAREHOUSE, REGION_IDS, WAREHOUSE_IDS, mo, realistic_result):
+    realistic_open_cities = sorted(
+        CITY_BY_WAREHOUSE[warehouse_id]
+        for warehouse_id in realistic_result["open_centers"]
+    )
 
-    The model could not be solved optimally.
-
-    **Solver status:** `{course_result["status"]}`
-    """
-        )
-    else:
-        _type_counts_df = (
-            pd.Series(
-                course_result["selected_type"],
-                name="center_type",
-            )
-            .value_counts()
-            .rename_axis("Center type")
-            .reset_index(name="Number of centers")
-            .sort_values("Center type")
-        )
-
-        mo.vstack(
-            [
-                mo.md(
-                    f"""
-    ### Course-Template Extension Results
+    mo.md(f"""
+    ### Realistic Model Results
 
     | Metric | Result |
     |:---|---:|
-    | Solver status | **{course_result["status"]}** |
-    | Total annual cost | **€{course_result["total_cost"]:,.0f}** |
-    | Transportation cost | **€{course_result["transportation_cost"]:,.0f}** |
-    | Center fixed cost | **€{course_result["center_fixed_cost"]:,.0f}** |
-    | Processing cost | **€{course_result["processing_cost"]:,.0f}** |
-    | Open locations | **{course_result["n_open"]} of 42** |
+    | Solver status | **{realistic_result["status"]}** |
+    | Total annual cost | **€{realistic_result["total_cost"]:,.0f}** |
+    | Transportation cost | **€{realistic_result["transportation_cost"]:,.0f}** |
+    | Center fixed cost | **€{realistic_result["center_fixed_cost"]:,.0f}** |
+    | Variable processing cost | **€{realistic_result["processing_cost"]:,.0f}** |
+    | Open locations | **{realistic_result["n_open"]} of {len(WAREHOUSE_IDS)}** |
+    | Assigned regions | **{len(realistic_result["assignment"])} of {len(REGION_IDS)}** |
 
-    #### Selected size categories
-    """
-                ),
-                mo.ui.table(_type_counts_df),
-            ]
-        )
-    return
+    #### Open locations
 
-
-@app.cell
-def _(REGION_IDS, course_result, mo):
-    assert course_result["status"] == "Optimal"
-    assert len(course_result["assignment"]) == len(REGION_IDS)
-    assert len(course_result["selected_type"]) == course_result["n_open"]
-
-    mo.md(
-        "✅ The course-template model assigns every region and "
-        "selects at most one size category per open location."
-    )
-    return
-
-
-@app.cell
-def _(
-    CITY_BY_WAREHOUSE,
-    COURSE_CENTER_TYPES,
-    DEMAND_BY_REGION,
-    course_result,
-    np,
-    pd,
-):
-    course_center_table = pd.DataFrame(
-        [
-            {
-                "warehouseID": warehouse_id,
-                "city": CITY_BY_WAREHOUSE[warehouse_id],
-                "selected_type": center_type,
-                "assigned_volume": (
-                    course_result["assigned_volume"][warehouse_id]
-                ),
-                "lower_bound": (
-                    COURSE_CENTER_TYPES[
-                        center_type
-                    ]["lower_bound"]
-                ),
-                "upper_bound": (
-                    COURSE_CENTER_TYPES[
-                        center_type
-                    ]["upper_bound"]
-                ),
-            }
-            for warehouse_id, center_type
-            in course_result["selected_type"].items()
-        ]
-    )
-
-    course_center_table["within_bounds"] = (
-        (
-            course_center_table["assigned_volume"]
-            >= course_center_table["lower_bound"]
-        )
-        &
-        (
-            course_center_table["assigned_volume"]
-            <= course_center_table["upper_bound"]
-        )
-    )
-
-    course_center_table["capacity_utilization"] = np.where(
-        course_center_table["selected_type"] == "h",
-        np.nan,
-        (
-            course_center_table["assigned_volume"]
-            / course_center_table["upper_bound"]
-        ),
-    )
-
-    assert course_center_table["within_bounds"].all()
-
-    assert np.isclose(
-        course_center_table["assigned_volume"].sum(),
-        sum(DEMAND_BY_REGION.values()),
-    )
-
-    course_center_table.sort_values(
-        "assigned_volume",
-        ascending=False,
-    )
+    {", ".join(realistic_open_cities)}
+    """)
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Capacity Validation
+    ### Interpretation of the realistic model
 
-    Every open location operates within the lower and upper volume bounds of
-    its selected size category. The total volume processed by all open
-    locations also equals the total demand of the customer regions.
+    The upgradeable model produces a substantially different network from the baseline formulation. Instead of concentrating demand in a small number of facilities, the optimizer selects 25 of the 42 available warehouse locations while simultaneously determining the most economical operating size for each of them.
 
-    This confirms that the assumed capacity model is internally consistent.
-    It does not validate the assumed capacity bounds against CashLog's
-    actual physical facilities.
+    ### Cost structure
 
-    No utilization ratio is reported for type `h` because its upper bound is
-    a technical modeling value rather than an estimated physical capacity.
+    Although the total annual cost increases from the baseline solution to €202 million, this should not be interpreted as a deterioration of the network. The baseline model omitted several important operational costs and assumed unlimited processing capacity. The higher objective value therefore represents the cost of operating a network that is both economically and operationally feasible.
+
+    The cost breakdown also provides useful insight into the main cost drivers. Fixed facility costs account for approximately 68 % of the total objective, transportation costs for 28 %, and variable processing costs for only about 4.5 %. This confirms that infrastructure decisions dominate the optimization problem, while the processing-cost component primarily serves to distinguish economically attractive warehouse sizes rather than driving the objective on its own.
+
+    ### Selected center sizes
+
+    The selected tier distribution further supports the plausibility of the solution.
+
+    |Tier | n_centers|
+    |---|---|
+    |v	|1|
+    |s	|8|
+    |m	|14|
+    |l	|1|
+    |h	|1|
+
+    The optimizer strongly favors medium-sized facilities (14 of 25), supplemented by a substantial group of small centers, while opening only one large and one huge center. This is an intuitive outcome. Very small centers cannot efficiently absorb large demand volumes, whereas very large centers incur substantially higher fixed investment despite benefiting from lower processing costs per delivery. Medium-sized facilities therefore provide the best trade-off between capacity, transportation efficiency, and operating cost for much of the network.
+
+    The resulting network is consequently far more balanced than the baseline solution and reflects a realistic mixture of regional and high-capacity facilities rather than relying on only a few oversized hubs.
+
+    Computational note. The calibrated cost structure introduces a 26.7× spread between the smallest and largest tier's fixed cost. This makes every tier decision an economically substantive trade-off — which is the entire point of the extension — but it also weakens the LP relaxation and makes the model considerably harder to solve than a formulation with flatter cost differences. Three modelling refinements were required to obtain a proven optimum: tightening the big-M bound on each location to the total demand of the regions actually reachable from it, pruning tier variables that a location's reachable demand can never fill, and scaling the objective to thousands of euros for numerical stability. With these in place, the model solves to proven optimality in approximately three minutes.
+
+    ### Assignment Summay
     """)
     return
 
 
 @app.cell
-def _(basic_result, course_result, pd):
-    model_comparison = pd.DataFrame(
-        [
-            {
-                "model": "Data-based baseline",
-                "status": basic_result["status"],
-                "total_cost": basic_result["total_cost"],
-                "transportation_cost": (
-                    basic_result["transportation_cost"]
-                ),
-                "facility_and_processing_cost": (
-                    basic_result["fixed_cost"]
-                ),
-                "open_locations": basic_result["n_open"],
-            },
-            {
-                "model": "Course-template extension",
-                "status": course_result["status"],
-                "total_cost": course_result["total_cost"],
-                "transportation_cost": (
-                    course_result["transportation_cost"]
-                ),
-                "facility_and_processing_cost": (
-                    course_result["center_fixed_cost"]
-                    + course_result["processing_cost"]
-                ),
-                "open_locations": course_result["n_open"],
-            },
-        ]
+def _(
+    CAPACITY_BY_TIER,
+    c_var_by_tier,
+    fixed_by_tier,
+    mo,
+    pd,
+    realistic_result,
+    regions_flat,
+    warehouses_flat,
+):
+    realistic_assignment_df = pd.DataFrame(
+        realistic_result["assignment"],
+        columns=["warehouseID", "regionID"],
     )
 
-    model_comparison
+    realistic_center_summary = (
+        realistic_assignment_df
+        .merge(
+            regions_flat[
+                ["regionID", "yearlyDemand"]
+            ],
+            on="regionID",
+            how="left",
+        )
+        .groupby("warehouseID")
+        .agg(
+            assigned_volume=(
+                "yearlyDemand",
+                "sum",
+            ),
+            assigned_regions=(
+                "regionID",
+                "nunique",
+            ),
+        )
+        .reset_index()
+        .merge(
+            warehouses_flat[
+                [
+                    "warehouseID",
+                    "city",
+                ]
+            ],
+            on="warehouseID",
+            how="left",
+        )
+    )
+
+    realistic_center_summary["selected_tier"] = (
+        realistic_center_summary["warehouseID"]
+        .map(realistic_result["selected_type"])
+    )
+
+    realistic_center_summary["variable_processing_cost"] = (
+        realistic_center_summary["selected_tier"]
+        .map(c_var_by_tier)
+    )
+
+    realistic_center_summary["upper_capacity"] = (
+        realistic_center_summary["selected_tier"]
+        .map(
+            lambda tier: CAPACITY_BY_TIER[tier]["upper_bound"]
+        )
+    )
+
+    realistic_center_summary["capacity_utilization"] = (
+        realistic_center_summary["assigned_volume"]
+        / realistic_center_summary["upper_capacity"]
+    )
+
+    realistic_center_summary["tier_fixed_cost"] = (
+        realistic_center_summary["selected_tier"]
+        .map(fixed_by_tier)
+    )
+
+    realistic_center_summary = (
+        realistic_center_summary[
+            [
+                "warehouseID",
+                "city",
+                "selected_tier",
+                "assigned_regions",
+                "assigned_volume",
+                "upper_capacity",
+                "capacity_utilization",
+                "tier_fixed_cost",
+                "variable_processing_cost",
+            ]
+        ]
+        .sort_values(
+            "assigned_volume",
+            ascending=False,
+        )
+        .reset_index(drop=True)
+    )
+
+    realistic_center_summary_display = (
+        realistic_center_summary.copy()
+    )
+
+    realistic_center_summary_display["assigned_volume"] = (
+        realistic_center_summary_display[
+            "assigned_volume"
+        ]
+        .map(lambda value: f"{value:,.0f}")
+    )
+
+    realistic_center_summary_display["tier_fixed_cost"] = (
+        realistic_center_summary_display[
+            "tier_fixed_cost"
+        ]
+        .map(lambda value: f"€{value:,.0f}")
+    )
+
+    realistic_center_summary_display[
+        "variable_processing_cost"
+    ] = (
+        realistic_center_summary_display[
+            "variable_processing_cost"
+        ]
+        .map(lambda value: f"€{value:.2f}")
+    )
+
+    realistic_center_summary_display["upper_capacity"] = (
+        realistic_center_summary_display[
+            "upper_capacity"
+        ].map(lambda value: f"{value:,.0f}")
+    )
+
+    realistic_center_summary_display["capacity_utilization"] = (
+        realistic_center_summary_display[
+            "capacity_utilization"
+        ].map(lambda value: f"{100*value:.1f}%")
+    )
+
+    mo.ui.table(
+        realistic_center_summary_display,
+        selection=None,
+        pagination=True,
+    )
+    return (realistic_assignment_df,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The volume summary shows that the optimizer uses the available capacity very efficiently. Almost all small, medium, and large facilities operate close to their respective capacity limits, indicating that the selected tier sizes are economically well matched to the assigned demand. Rather than opening unnecessarily large facilities, the optimizer consistently chooses the smallest tier capable of accommodating the allocated volume.
+
+    The only exception is the single huge center, which exhibits a very low utilization rate. This is expected, as the upper capacity of the largest tier is intentionally set to a very large value to avoid imposing an artificial upper limit on the highest-capacity facilities. Consequently, its utilization percentage is not directly comparable to the remaining tiers.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Network Visualization
+    """)
+    return
+
+
+@app.cell
+def _(
+    CITY_BY_WAREHOUSE,
+    folium,
+    mcolors,
+    mo,
+    plt,
+    realistic_assignment_df,
+    realistic_result,
+    regions_flat,
+    warehouses_flat,
+):
+    # ---------------------------------------------------------
+    # Shared data and colors
+    # ---------------------------------------------------------
+
+    realistic_open_centers = (
+        realistic_result["open_centers"]
+    )
+
+    realistic_open_center_set = set(
+        realistic_open_centers
+    )
+
+    realistic_assignment_map_df = (
+        realistic_assignment_df
+        .merge(
+            regions_flat[
+                [
+                    "regionID",
+                    "city",
+                    "lat",
+                    "lon",
+                    "yearlyDemand",
+                ]
+            ],
+            on="regionID",
+            how="left",
+        )
+    )
+
+    map_center = [
+        warehouses_flat["lat"].mean(),
+        warehouses_flat["lon"].mean(),
+    ]
+
+    # One distinct color for every open center
+    realistic_cmap = plt.get_cmap(
+        "gist_ncar",
+        len(realistic_open_centers),
+    )
+
+    color_by_center = {
+        warehouse_id: mcolors.to_hex(
+            realistic_cmap(position)
+        )
+        for position, warehouse_id
+        in enumerate(realistic_open_centers)
+    }
+
+
+    # ---------------------------------------------------------
+    # Map 1: Open and closed centers
+    # ---------------------------------------------------------
+
+    open_closed_map = folium.Map(
+        location=map_center,
+        zoom_start=6,
+        tiles="cartodbpositron",
+    )
+
+    for row in warehouses_flat.itertuples():
+
+        is_open = (
+            row.warehouseID
+            in realistic_open_center_set
+        )
+
+        selected_tier = (
+            realistic_result["selected_type"]
+            .get(row.warehouseID)
+        )
+
+        assigned_volume = (
+            realistic_result["assigned_volume"]
+            .get(row.warehouseID, 0)
+        )
+
+        marker_color = (
+            color_by_center[row.warehouseID]
+            if is_open
+            else "#9e9e9e"
+        )
+
+        folium.CircleMarker(
+            location=[
+                row.lat,
+                row.lon,
+            ],
+            radius=9 if is_open else 5,
+            color=marker_color,
+            fill=True,
+            fill_color=marker_color,
+            fill_opacity=0.9 if is_open else 0.35,
+            weight=2 if is_open else 1,
+            popup=folium.Popup(
+                f"""
+                <b>{row.city}</b><br>
+                Status: {"Open" if is_open else "Closed"}<br>
+                Tier: {selected_tier if is_open else "–"}<br>
+                Assigned volume: {assigned_volume:,.0f}
+                """,
+                max_width=250,
+            ),
+            tooltip=(
+                f"{row.city}: "
+                f"{'Open' if is_open else 'Closed'}"
+            ),
+        ).add_to(open_closed_map)
+
+
+    # ---------------------------------------------------------
+    # Map 2: Demand regions colored by assigned center
+    # ---------------------------------------------------------
+
+    assignment_map = folium.Map(
+        location=map_center,
+        zoom_start=6,
+        tiles="cartodbpositron",
+    )
+
+    for row in (
+        realistic_assignment_map_df.itertuples()
+    ):
+
+        assigned_center_city = (
+            CITY_BY_WAREHOUSE[
+                row.warehouseID
+            ]
+        )
+
+        region_color = (
+            color_by_center[
+                row.warehouseID
+            ]
+        )
+
+        folium.CircleMarker(
+            location=[
+                row.lat,
+                row.lon,
+            ],
+            radius=3,
+            color=region_color,
+            fill=True,
+            fill_color=region_color,
+            fill_opacity=0.75,
+            weight=1,
+            popup=folium.Popup(
+                f"""
+                <b>Region {row.regionID}</b><br>
+                City: {row.city}<br>
+                Annual demand: {row.yearlyDemand:,.0f}<br>
+                Assigned center: {assigned_center_city}
+                """,
+                max_width=250,
+            ),
+            tooltip=(
+                f"Region {row.regionID} → "
+                f"{assigned_center_city}"
+            ),
+        ).add_to(assignment_map)
+
+    # Add open cash centers using the same assignment colors
+    for row in warehouses_flat.itertuples():
+
+        if (
+            row.warehouseID
+            not in realistic_open_center_set
+        ):
+            continue
+
+        center_color = (
+            color_by_center[
+                row.warehouseID
+            ]
+        )
+
+        selected_tier = (
+            realistic_result["selected_type"][
+                row.warehouseID
+            ]
+        )
+
+        assigned_volume = (
+            realistic_result["assigned_volume"][
+                row.warehouseID
+            ]
+        )
+
+        folium.CircleMarker(
+            location=[
+                row.lat,
+                row.lon,
+            ],
+            radius=9,
+            color="#000000",
+            fill=True,
+            fill_color=center_color,
+            fill_opacity=1,
+            weight=2,
+            popup=folium.Popup(
+                f"""
+                <b>{row.city}</b><br>
+                Tier: {selected_tier}<br>
+                Assigned volume: {assigned_volume:,.0f}
+                """,
+                max_width=250,
+            ),
+            tooltip=f"Cash Center: {row.city}",
+        ).add_to(assignment_map)
+
+
+    # ---------------------------------------------------------
+    # Display both maps in one output cell
+    # ---------------------------------------------------------
+
+    mo.ui.tabs(
+        {
+            "Open / closed centers": open_closed_map,
+            "Regional assignments": assignment_map,
+        }
+    )
     return
 
 
@@ -1546,124 +2658,63 @@ def _(basic_result, course_result, pd):
 def _(mo):
     mo.md(r"""
     ### 5.4 Model Comparison
-
-    The two objective values should not be interpreted as directly competing
-    cost estimates because the models use different facility-cost
-    structures.
-
-    The relevant comparison is structural: it shows whether the selected
-    locations remain similar when flexible size categories and the
-    course-template capacity assumptions are introduced. Locations selected
-    by both models provide stronger evidence of strategic importance than
-    locations selected by only one formulation.
     """)
     return
 
 
 @app.cell
-def _(folium, mcolors, pd, plt, regions_flat, warehouses_flat):
-    def create_network_map(result):
-        open_centers = result["open_centers"]
-
-        assignment_map_df = pd.DataFrame(
-            result["assignment"],
-            columns=["warehouseID", "regionID"],
-        ).merge(
-            regions_flat[
-                ["regionID", "lat", "lon", "city"]
-            ],
-            on="regionID",
-        )
-
-        map_center_lat = warehouses_flat["lat"].mean()
-        map_center_lon = warehouses_flat["lon"].mean()
-
-        cmap = plt.get_cmap(
-            "tab20",
-            max(len(open_centers), 1),
-        )
-
-        color_by_center = {
-            warehouse_id: mcolors.to_hex(cmap(position))
-            for position, warehouse_id
-            in enumerate(open_centers)
-        }
-
-        network_map = folium.Map(
-            location=[map_center_lat, map_center_lon],
-            zoom_start=6,
-            tiles="cartodbpositron",
-        )
-
-        for _row in assignment_map_df.itertuples():
-            folium.CircleMarker(
-                location=[_row.lat, _row.lon],
-                radius=2,
-                color=color_by_center.get(
-                    _row.warehouseID,
-                    "#999999",
-                ),
-                fill=True,
-                fill_opacity=0.6,
-            ).add_to(network_map)
-
-        selected_type = result.get(
-            "selected_type",
-            {},
-        )
-
-        for _row in warehouses_flat.itertuples():
-            is_open = (
-                _row.warehouseID in open_centers
-            )
-
-            type_label = selected_type.get(
-                _row.warehouseID,
-                "not specified",
-            )
-
-            folium.CircleMarker(
-                location=[_row.lat, _row.lon],
-                radius=8 if is_open else 4,
-                color=(
-                    color_by_center.get(
-                        _row.warehouseID,
-                        "#999999",
-                    )
-                    if is_open
-                    else "#999999"
-                ),
-                fill=True,
-                fill_opacity=1 if is_open else 0.2,
-                popup=(
-                    f"{_row.city}<br>"
-                    f"Status: "
-                    f"{'open' if is_open else 'closed'}<br>"
-                    f"Type: {type_label}"
-                ),
-            ).add_to(network_map)
-
-        return network_map
-
-    return (create_network_map,)
-
-
-@app.cell
-def _(basic_result, course_result, create_network_map, mo):
-    basic_network_map = create_network_map(
-        basic_result
+def _(basic_result, mo, pd, realistic_result):
+    model_comparison = pd.DataFrame(
+        [
+            {
+                "Model": "Baseline",
+                "Total annual cost": basic_result["total_cost"],
+                "Transportation cost": basic_result["transportation_cost"],
+                "Center fixed cost": basic_result["fixed_cost"],
+                "Variable processing cost": 0,
+                "Open locations": basic_result["n_open"],
+            },
+            {
+                "Model": "Realistic upgradeable model",
+                "Total annual cost": realistic_result["total_cost"],
+                "Transportation cost": realistic_result["transportation_cost"],
+                "Center fixed cost": realistic_result["center_fixed_cost"],
+                "Variable processing cost": realistic_result["processing_cost"],
+                "Open locations": realistic_result["n_open"],
+            },
+        ]
     )
 
-    course_network_map = create_network_map(
-        course_result
-    )
+    model_comparison_display = model_comparison.copy()
 
-    mo.ui.tabs(
-        {
-            "Data-based baseline": basic_network_map,
-            "Course-template extension": course_network_map,
-        }
-    )
+    for column in [
+        "Total annual cost",
+        "Transportation cost",
+        "Center fixed cost",
+        "Variable processing cost",
+    ]:
+        model_comparison_display[column] = (
+            model_comparison_display[column]
+            .map(lambda value: f"€{value:,.0f}")
+        )
+
+    mo.ui.table(model_comparison_display)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The table summarizes the effect of progressively extending the optimization model. The baseline formulation identifies the lowest-cost network under the simplifying assumption of unlimited processing capacity and fixed facility sizes. The realistic model, in contrast, jointly optimizes facility size, capacity, and variable processing costs.
+
+    As expected, introducing these additional operational considerations increases the total annual cost from €98.6 million to €202.0 million and raises the number of open cash centers from 18 to 25.  This increase should not be interpreted as a deterioration of the solution. Rather, it reflects the cost of operating a network that is both operationally feasible and economically more realistic.
+
+    The comparison also reveals an interesting shift in the cost structure. Transportation cost decreases from €66.3 million to €56.0 million, indicating that the larger number of open facilities allows customer regions to be served from geographically closer locations. These savings are offset by substantially higher facility costs, as the model now explicitly accounts for realistic capacity planning and introduces variable processing costs. Consequently, the optimization no longer minimizes transportation and facility count alone but instead balances transportation efficiency, processing efficiency, and infrastructure investment.
+
+    Overall, the resulting network represents a considerably more balanced solution than the baseline model. Rather than concentrating demand in a small number of inexpensive facilities, the optimizer distributes demand across a larger set of appropriately sized cash centers while exploiting economies of scale where economically beneficial.
+
+    Having established a realistic optimization model, the remaining question is no longer how to formulate the network design problem, but how robust the resulting solution is with respect to the assumptions underlying the cost model. In particular, the variable processing costs, the degree of economies of scale, and several operational parameters were derived from reasonable but ultimately uncertain assumptions. The following sensitivity analysis therefore examines how changes in these assumptions affect both the total cost and the structure of the recommended network.
+    """)
     return
 
 
@@ -1672,363 +2723,377 @@ def _(mo):
     mo.md(r"""
     ## 6. Sensitivity Analysis
 
-    The sensitivity analysis examines four sources of uncertainty:
+    The realistic upgradeable model rests on assumptions about demand, costs, and technology that are inherently uncertain. The sensitivity analysis therefore tests how robust the recommended network is when these assumptions are varied.
 
-    1. declining demand for cash services;
-    2. rising shift costs, representing combined wage, fuel, maintenance,
-       and vehicle-cost pressure;
-    3. rising processing labor costs inside cash centers;
-    4. technological changes affecting transport cost or travel time.
+    The analysis focuses deliberately on external factors that CashLog does not control:
 
-    The parameter values are stress-test assumptions rather than forecasts.
-    For each scenario, changes in total cost, network size, and selected
-    locations are recorded.
+    - the secular decline in cash usage
+    -  rising transport costs
+    -  technological change
+
+    rather than on the full space of internal calibration parameters. This is also due to the solver taking a long time per solve. Solving more than 15 scenarions with 3 minutes per solve would take up to an hour. A single model-assumption scenario is included as a robustness check on the economies-of-scale exponent, which is the one assumption that directly shapes the tier structure.
+    The fixed-cost data is not varied, because it is observed rather than assumed. The processing-cost anchor is not varied separately either: it scales ctvarc_t^{var}
+    ctvar​ linearly, exactly as a proportional processing-cost shock would, and its structural effect is already captured by the α\alpha
+    α scenario.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 6.1 Central Scenario Definitions
+
+    The base-case network is solved to proven optimality. The scenarios, by contrast, are solved with a 1 % relative MIP gap and a 120-second time limit to keep the analysis computationally tractable. Their solutions are therefore near-optimal rather than proven optima, and the residual gap is reported for every scenario so that its precision can be judged rather than assumed.
+
+    The analysis reads the results accordingly. Its purpose is to identify directional effects, whether an external shock pushes the network towards consolidation or towards densification, and by roughly how much total cost changes, not to certify the exact optimal facility count under each scenario. Differences of a single facility between two scenarios lie within the solver tolerance and are not interpreted as meaningful.
     """)
     return
 
 
 @app.cell
+def _(BASE_SHIFT_COST, BASE_SHIFT_MINUTES, mo):
+    # ---------------------------------------------------------
+    # 6.1 Scenario definitions
+    # ---------------------------------------------------------
+    # Each scenario maps a label to the kwargs passed to
+    # solve_realistic_network(). The base case is NOT re-solved; it is
+    # reused from realistic_result.
+
+    SENS_GAP_REL = 0.01
+    SENS_TIME_LIMIT = 120
+
+    SCENARIO_FAMILIES = {
+        "Declining demand": {
+            "Strong decline (-30%)": {"demand_factor": 0.7},
+            "Severe decline (-50%)": {"demand_factor": 0.5},
+        },
+        "Rising transport cost": {
+            "Strong increase (+50%)": {
+                "shift_cost": BASE_SHIFT_COST * 1.5
+            },
+        },
+        "Technology": {
+            "Extended operating time (900 min)": {
+                "shift_minutes": 900,
+                "shift_cost": BASE_SHIFT_COST * (900 / BASE_SHIFT_MINUTES),
+            },
+        },
+        "Model assumptions": {
+            "Full scale effect (alpha=1.0)": {"alpha": 1.0},
+        },
+    }
+
+    n_scenarios = sum(len(f) for f in SCENARIO_FAMILIES.values())
+
+    mo.md(
+        "| Scenario family | Scenario | Varied parameter |\n"
+        "|---|---|---|\n"
+        + "\n".join(
+            f"| {family} | {label} | "
+            f"{', '.join(f'`{k}`' for k in kwargs)} |"
+            for family, scenarios in SCENARIO_FAMILIES.items()
+            for label, kwargs in scenarios.items()
+        )
+        + f"\n\n**{n_scenarios} scenarios** (excl. base case), "
+        f"solved at a {SENS_GAP_REL:.0%} MIP gap, "
+        f"{SENS_TIME_LIMIT}s limit each."
+    )
+    return SCENARIO_FAMILIES, SENS_GAP_REL, SENS_TIME_LIMIT, n_scenarios
+
+
+@app.cell(hide_code=True)
 def _(mo):
+    mo.md(r"""
+    ### 6.2 Central Solve Run
+
+    All scenarios are solved once, in a single button-triggered cell, and cached. Every subsequent subsection reads from this cache rather than invoking the solver again. Each scenario is warm-started from the base-case solution, which is structurally close to most scenarios and shortens the solver's initial search.
+    """)
+    return
+
+
+@app.cell
+def _(SENS_TIME_LIMIT, mo, n_scenarios):
     run_sensitivity = mo.ui.run_button(
         label="Run sensitivity analysis"
     )
 
-    run_sensitivity
+    mo.md(f"""
+    Solving **{n_scenarios}** scenarios
+    (worst case ~{n_scenarios * SENS_TIME_LIMIT / 60:.0f} minutes).
+
+    {run_sensitivity}
+    """)
     return (run_sensitivity,)
 
 
 @app.cell
 def _(
-    BASE_SHIFT_COST,
-    course_result,
+    SCENARIO_FAMILIES,
+    SENS_GAP_REL,
+    SENS_TIME_LIMIT,
     mo,
     pd,
+    realistic_result,
     run_sensitivity,
-    solve_course_network,
+    solve_realistic_network,
 ):
     mo.stop(not run_sensitivity.value)
 
     import time as _time
 
-    demand_course_results = {
-        1.0: course_result,
-    }
+    scenario_results = {}
+    _rows = []
 
-    shift_course_results = {
-        1.0: course_result,
-    }
+    for _family, _scenarios in SCENARIO_FAMILIES.items():
 
-    processing_course_results = {
-        1.0: course_result,
-    }
+        scenario_results[_family] = {}
 
-    technology_course_results = {
-        "base": course_result,
-    }
+        for _label, _kwargs in _scenarios.items():
 
-    _runtime_rows = []
+            _start = _time.perf_counter()
 
-    for _factor in [0.9, 0.7, 0.5]:
-        _start = _time.perf_counter()
+            _result = solve_realistic_network(
+                warm_start_from=realistic_result,
+                gap_rel=SENS_GAP_REL,
+                time_limit=SENS_TIME_LIMIT,
+                **_kwargs,
+            )
 
-        _result = solve_course_network(
-            demand_factor=_factor
-        )
+            _runtime = _time.perf_counter() - _start
+            scenario_results[_family][_label] = _result
 
-        _runtime = (
-            _time.perf_counter() - _start
-        )
-
-        demand_course_results[_factor] = _result
-
-        _runtime_rows.append(
-            {
-                "family": "Demand",
-                "scenario": f"{_factor:.0%}",
+            _rows.append({
+                "family": _family,
+                "scenario": _label,
                 "status": _result["status"],
-                "runtime_seconds": round(
-                    _runtime,
-                    1,
-                ),
-            }
-        )
+                "mip_gap": _result["mip_gap"],
+                "runtime_seconds": round(_runtime, 1),
+            })
 
-        print(
-            f"Demand {_factor:.0%}: "
-            f"{_result['status']} "
-            f"({_runtime:.1f} seconds)",
-            flush=True,
-        )
+            print(
+                f"[{_family}] {_label}: "
+                f"gap={_result['mip_gap']:.2%} "
+                f"({_runtime:.0f}s)",
+                flush=True,
+            )
 
-    for _factor in [1.2, 1.5]:
-        _start = _time.perf_counter()
+    sensitivity_runtime = pd.DataFrame(_rows)
 
-        _result = solve_course_network(
-            shift_cost=BASE_SHIFT_COST * _factor
-        )
+    mo.md(f"""
+    **Solve complete.** {len(_rows)} scenarios,
+    total runtime **{sensitivity_runtime['runtime_seconds'].sum() / 60:.1f} min**.
 
-        _runtime = (
-            _time.perf_counter() - _start
-        )
-
-        shift_course_results[_factor] = _result
-
-        _runtime_rows.append(
-            {
-                "family": "Shift cost",
-                "scenario": f"x{_factor:.1f}",
-                "status": _result["status"],
-                "runtime_seconds": round(
-                    _runtime,
-                    1,
-                ),
-            }
-        )
-
-        print(
-            f"Shift cost x{_factor:.1f}: "
-            f"{_result['status']} "
-            f"({_runtime:.1f} seconds)",
-            flush=True,
-        )
-
-    for _factor in [1.2, 1.5]:
-        _start = _time.perf_counter()
-
-        _result = solve_course_network(
-            processing_cost_factor=_factor
-        )
-
-        _runtime = (
-            _time.perf_counter() - _start
-        )
-
-        processing_course_results[_factor] = (
-            _result
-        )
-
-        _runtime_rows.append(
-            {
-                "family": "Processing cost",
-                "scenario": f"x{_factor:.1f}",
-                "status": _result["status"],
-                "runtime_seconds": round(
-                    _runtime,
-                    1,
-                ),
-            }
-        )
-
-        print(
-            f"Processing cost x{_factor:.1f}: "
-            f"{_result['status']} "
-            f"({_runtime:.1f} seconds)",
-            flush=True,
-        )
-
-    _TECHNOLOGY_SCENARIOS = {
-        "lower_transport_cost": {
-            "shift_cost": BASE_SHIFT_COST * 0.4,
-            "travel_factor": 1.0,
-        },
-        "faster_travel": {
-            "shift_cost": BASE_SHIFT_COST,
-            "travel_factor": 0.8,
-        },
-        "combined_technology": {
-            "shift_cost": BASE_SHIFT_COST * 0.4,
-            "travel_factor": 0.8,
-        },
-    }
-
-    for _scenario_name, _parameters in (
-        _TECHNOLOGY_SCENARIOS.items()
-    ):
-        _start = _time.perf_counter()
-
-        _result = solve_course_network(
-            **_parameters
-        )
-
-        _runtime = (
-            _time.perf_counter() - _start
-        )
-
-        technology_course_results[
-            _scenario_name
-        ] = _result
-
-        _runtime_rows.append(
-            {
-                "family": "Technology",
-                "scenario": _scenario_name,
-                "status": _result["status"],
-                "runtime_seconds": round(
-                    _runtime,
-                    1,
-                ),
-            }
-        )
-
-        print(
-            f"{_scenario_name}: "
-            f"{_result['status']} "
-            f"({_runtime:.1f} seconds)",
-            flush=True,
-        )
-
-
-    sensitivity_runtime = pd.DataFrame(
-        _runtime_rows
-    )
-
-    sensitivity_runtime
-    return (
-        demand_course_results,
-        processing_course_results,
-        shift_course_results,
-        technology_course_results,
-    )
+    Largest residual MIP gap: **{sensitivity_runtime['mip_gap'].max():.2%}**
+    """)
+    return scenario_results, sensitivity_runtime
 
 
 @app.cell
-def _(
-    CITY_BY_WAREHOUSE,
-    demand_course_results,
-    pd,
-    processing_course_results,
-    shift_course_results,
-    technology_course_results,
-):
-    def summarize_scenario(
-        scenario_family,
-        scenario_name,
-        result,
-        reference_result,
-    ):
-        """Create one summary row for an optimization scenario."""
+def _(CITY_BY_WAREHOUSE, REALISTIC_TYPE_IDS, REGION_IDS, pd):
+    def summarize_scenario(family, label, result, base):
+        """Build one summary row, including structural change metrics."""
 
         if result["status"] != "Optimal":
             return {
-                "family": scenario_family,
-                "scenario": scenario_name,
+                "family": family,
+                "scenario": label,
                 "status": result["status"],
+                "mip_gap": result.get("mip_gap", float("nan")),
                 "total_cost": None,
-                "cost_change_vs_base": None,
-                "open_locations": None,
+                "cost_change": None,
+                "transport_cost": None,
+                "fixed_cost": None,
+                "processing_cost": None,
+                "n_open": None,
+                "centers_changed": None,
+                "regions_reassigned": None,
+                "tier_mix": "–",
                 "opened_vs_base": "–",
                 "closed_vs_base": "–",
             }
 
-        result_open = set(result["open_centers"])
-        reference_open = set(reference_result["open_centers"])
+        open_now = set(result["open_centers"])
+        open_base = set(base["open_centers"])
 
-        newly_opened = sorted(
-            CITY_BY_WAREHOUSE[warehouse_id]
-            for warehouse_id in result_open - reference_open
+        opened = sorted(
+            CITY_BY_WAREHOUSE[w] for w in open_now - open_base
+        )
+        closed = sorted(
+            CITY_BY_WAREHOUSE[w] for w in open_base - open_now
         )
 
-        newly_closed = sorted(
-            CITY_BY_WAREHOUSE[warehouse_id]
-            for warehouse_id in reference_open - result_open
+        # Structural metric 1: how many facilities flipped
+        centers_changed = len(open_now ^ open_base)
+
+        # Structural metric 2: share of regions served by a different center
+        base_map = dict(
+            (r, w) for w, r in base["assignment"]
+        )
+        now_map = dict(
+            (r, w) for w, r in result["assignment"]
+        )
+        reassigned = sum(
+            1
+            for region_id in REGION_IDS
+            if base_map.get(region_id) != now_map.get(region_id)
         )
 
-        cost_change = (
-            result["total_cost"]
-            / reference_result["total_cost"]
-            - 1
+        tier_counts = pd.Series(
+            result["selected_type"]
+        ).value_counts()
+
+        tier_mix = " ".join(
+            f"{t}:{tier_counts.get(t, 0)}"
+            for t in REALISTIC_TYPE_IDS
         )
 
         return {
-            "family": scenario_family,
-            "scenario": scenario_name,
+            "family": family,
+            "scenario": label,
             "status": result["status"],
+            "mip_gap": result["mip_gap"],
             "total_cost": result["total_cost"],
-            "cost_change_vs_base": cost_change,
-            "open_locations": result["n_open"],
-            "opened_vs_base": (
-                ", ".join(newly_opened)
-                if newly_opened
-                else "–"
+            "cost_change": (
+                result["total_cost"] / base["total_cost"] - 1
             ),
-            "closed_vs_base": (
-                ", ".join(newly_closed)
-                if newly_closed
-                else "–"
-            ),
+            "transport_cost": result["transportation_cost"],
+            "fixed_cost": result["center_fixed_cost"],
+            "processing_cost": result["processing_cost"],
+            "n_open": result["n_open"],
+            "centers_changed": centers_changed,
+            "regions_reassigned": reassigned / len(REGION_IDS),
+            "tier_mix": tier_mix,
+            "opened_vs_base": ", ".join(opened) or "–",
+            "closed_vs_base": ", ".join(closed) or "–",
         }
 
+    return (summarize_scenario,)
 
-    scenario_summary_rows = []
 
-    for factor, result in demand_course_results.items():
-        scenario_summary_rows.append(
-            summarize_scenario(
-                scenario_family="Demand",
-                scenario_name=f"{factor:.0%}",
-                result=result,
-                reference_result=demand_course_results[1.0],
-            )
+@app.cell
+def _(
+    mo,
+    pd,
+    realistic_result,
+    run_sensitivity,
+    scenario_results,
+    sensitivity_runtime,
+    summarize_scenario,
+):
+    mo.stop(not run_sensitivity.value)
+
+    _summary_rows = [
+        summarize_scenario(
+            "Base case",
+            "Base case",
+            realistic_result,
+            realistic_result,
         )
+    ]
 
-    for factor, result in shift_course_results.items():
-        scenario_summary_rows.append(
-            summarize_scenario(
-                scenario_family="Shift cost",
-                scenario_name=f"x{factor:.1f}",
-                result=result,
-                reference_result=shift_course_results[1.0],
+    for _family, _scenarios in scenario_results.items():
+        for _label, _result in _scenarios.items():
+            _summary_rows.append(
+                summarize_scenario(
+                    _family,
+                    _label,
+                    _result,
+                    realistic_result,
+                )
             )
-        )
 
-    for factor, result in processing_course_results.items():
-        scenario_summary_rows.append(
-            summarize_scenario(
-                scenario_family="Processing cost",
-                scenario_name=f"x{factor:.1f}",
-                result=result,
-                reference_result=processing_course_results[1.0],
-            )
-        )
+    sensitivity_summary = pd.DataFrame(_summary_rows)
 
-    for scenario_name, result in technology_course_results.items():
-        scenario_summary_rows.append(
-            summarize_scenario(
-                scenario_family="Technology",
-                scenario_name=scenario_name,
-                result=result,
-                reference_result=technology_course_results["base"],
-            )
-        )
-
-    sensitivity_summary = pd.DataFrame(
-        scenario_summary_rows
+    # Merge runtimes
+    sensitivity_summary = sensitivity_summary.merge(
+        sensitivity_runtime[
+            ["family", "scenario", "runtime_seconds"]
+        ],
+        on=["family", "scenario"],
+        how="left",
     )
 
     sensitivity_summary
     return (sensitivity_summary,)
 
 
+@app.cell
+def _(mo, pd, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
+    _display = sensitivity_summary.copy()
+
+    for _col in [
+        "total_cost",
+        "transport_cost",
+        "fixed_cost",
+        "processing_cost",
+    ]:
+        _display[_col] = _display[_col].map(
+            lambda v: f"€{v/1e6:,.1f}M" if pd.notna(v) else "–"
+        )
+
+    _display["cost_change"] = _display["cost_change"].map(
+        lambda v: f"{v:+.1%}" if pd.notna(v) else "–"
+    )
+    _display["mip_gap"] = _display["mip_gap"].map(
+        lambda v: f"{v:.2%}" if pd.notna(v) else "–"
+    )
+    _display["regions_reassigned"] = _display[
+        "regions_reassigned"
+    ].map(lambda v: f"{v:.1%}" if pd.notna(v) else "–")
+
+    mo.ui.table(
+        _display[
+            [
+                "family",
+                "scenario",
+                "total_cost",
+                "cost_change",
+                "n_open",
+                "tier_mix",
+                "centers_changed",
+                "regions_reassigned",
+                "mip_gap",
+            ]
+        ],
+        selection=None,
+        pagination=False,
+    )
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 6.1 Declining Cash Demand
+    ### 6.3 Declining Cash Demand
 
-    This analysis identifies the demand level at which the course-template
-    network begins to change. The relevant questions are whether lower demand
-    reduces only total cost or also leads to facility closures, changes in
-    the selected size categories, or geographical consolidation.
-
-    The tested demand factors are long-term stress-test assumptions rather
-    than forecasts for a specific year.
+    Electronic payment methods continue to displace physical currency. This family tests demand reductions of 30 % and 50 % — long-term stress-test assumptions rather than forecasts for a specific year.
+    The relevant question is not whether cost falls (it must), but how: does lower demand lead CashLog to close facilities, or to keep the same locations and operate them at smaller tiers? The two answers imply very different strategies.
     """)
     return
 
 
 @app.cell
-def _(sensitivity_summary):
+def _(mo, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
     sensitivity_summary[
-        sensitivity_summary["family"] == "Demand"
+        sensitivity_summary["family"].isin(
+            ["Base case", "Declining demand"]
+        )
+    ][
+        [
+            "scenario",
+            "total_cost",
+            "cost_change",
+            "transport_cost",
+            "fixed_cost",
+            "n_open",
+            "tier_mix",
+            "closed_vs_base",
+        ]
     ]
     return
 
@@ -2038,13 +3103,9 @@ def _(mo):
     mo.md(r"""
     #### Interpretation
 
-    Reducing demand to 90%, 70%, and 50% of the current level lowers total
-    annual cost by approximately 7.9%, 24.0%, and 41.0%, respectively.
-
-    The cost reduction is smaller than the demand reduction because facility
-    fixed costs remain even when fewer customer visits are required. Changes
-    in the number or identity of open locations indicate the demand levels
-    at which consolidation becomes economically preferable.
+    The network downsizes rather than consolidates. Reducing demand by 30 % lowers total cost by 20.0 %, and a 50 % reduction lowers it by 44.1 % — less than proportionally, because fixed facility costs persist regardless of how few customer visits remain.
+    The decisive observation, however, is not in the facility count but in the tier mix. The number of open centers barely moves (25 → 24 → 23), while the size distribution collapses downwards: the smallest tier grows from 1 to 7 locations, and medium-sized centers fall from 14 to 8. Under a 50 % decline, even the single huge center is closed entirely.
+    CashLog's response to declining cash usage is therefore primarily one of downsizing existing facilities, not shutting them down. Geographic coverage remains valuable even at half the demand, because transport cost still scales with distance; what becomes uneconomical is operating large processing capacity that is no longer filled. Nearly half of all customer regions (44.9 % and 51.1 %) are reassigned in the process, indicating that the assignment structure is far more fluid than the facility footprint.
     """)
     return
 
@@ -2052,24 +3113,33 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 6.2 Rising Wages and Fuel Costs
+    ### 6.4 Rising Wages and Fuel Costs
 
-    The €480 shift cost combines wages, fuel, depreciation, and maintenance.
-    Because no component-level breakdown is available, the analysis varies
-    the complete shift cost rather than attempting to estimate separate wage
-    and fuel effects.
-
-    The results reveal whether higher transport costs favor a denser network
-    with shorter service distances or whether consolidation remains more
-    economical.
+    The €480 shift cost bundles wages, fuel, depreciation, and maintenance. No component-level breakdown exists, so the analysis varies the complete shift cost rather than estimating separate wage and fuel effects.
+    Higher transport cost should make geographic proximity more valuable. If the model responds by opening more centers, that confirms the trade-off at the heart of the problem: fixed cost buys shorter distances.
     """)
     return
 
 
 @app.cell
-def _(sensitivity_summary):
+def _(mo, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
     sensitivity_summary[
-        sensitivity_summary["family"] == "Shift cost"
+        sensitivity_summary["family"].isin(
+            ["Base case", "Rising transport cost"]
+        )
+    ][
+        [
+            "scenario",
+            "total_cost",
+            "cost_change",
+            "transport_cost",
+            "fixed_cost",
+            "n_open",
+            "tier_mix",
+            "opened_vs_base",
+        ]
     ]
     return
 
@@ -2079,14 +3149,9 @@ def _(mo):
     mo.md(r"""
     #### Interpretation
 
-    A 20% increase in shift cost raises total annual cost by approximately
-    13.0%, while a 50% increase raises it by approximately 32.4%.
-
-    The total cost response is less than proportional because only the
-    transport component is changed; center fixed costs and processing costs
-    remain unchanged. Any additional locations selected in these scenarios
-    would indicate that higher transport costs strengthen the economic value
-    of shorter service distances.
+    Higher transport cost densifies the network. A 50 % increase in shift cost raises total cost by 15.6 % and increases the number of open centers from 25 to 29 — a direct confirmation of the central trade-off: fixed cost buys shorter distances, and when distance becomes more expensive, that purchase becomes worthwhile.
+    The response is visible in the cost structure. Transport cost rises from €56.0M to €80.8M — a factor of 1.44, less than the 1.5 shock applied. The additional facilities absorb part of the increase by shortening average service distances, while fixed cost rises only modestly (€136.9M → €143.5M).
+    Notably, this is the scenario with the largest cost change but the smallest structural change: only 27.4 % of regions are reassigned. The network does not reorganize; it thickens.
     """)
     return
 
@@ -2094,23 +3159,54 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 6.3 Rising Processing Labor Costs
+    ### 6.5 Technological Development
 
-    This scenario applies only to the course-template extension because the
-    data-based baseline does not contain a separate processing-cost
-    component.
-
-    The analysis shows whether higher in-center labor costs change the
-    preferred facility-size mix or strengthen the incentive to concentrate
-    volume in larger centers.
+    Technology is modelled through a longer usable shift: 900 minutes instead of 450. Shift cost is scaled proportionally, so the scenario models a genuinely longer productive shift rather than unpaid labour.
+    This scenario differs structurally from all others: it changes the reachability matrix itself. At 900 minutes, links up to 450 minutes of one-way travel become feasible, where previously the limit was 225. Distant regions that no center could reach economically suddenly enter the solution space, and the round-trip time is amortised over a far larger number of stops.
     """)
     return
 
 
 @app.cell
-def _(sensitivity_summary):
+def _(mo, realistic_result, run_sensitivity, scenario_results):
+    mo.stop(not run_sensitivity.value)
+
+    _tech = scenario_results["Technology"][
+        "Extended operating time (900 min)"
+    ]
+
+    _n_links_base = len(realistic_result["link_data"])
+    _n_links_tech = len(_tech["link_data"])
+
+    mo.md(f"""
+    | | Base case | Extended operating time |
+    |---|---:|---:|
+    | Reachable links | {_n_links_base:,} | **{_n_links_tech:,}** |
+    | Feasibility limit (one-way) | 225 min | **450 min** |
+    | Open centers | {realistic_result['n_open']} | **{_tech['n_open']}** |
+    | Total cost | €{realistic_result['total_cost']/1e6:,.1f}M | **€{_tech['total_cost']/1e6:,.1f}M** |
+    """)
+    return
+
+
+@app.cell
+def _(mo, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
     sensitivity_summary[
-        sensitivity_summary["family"] == "Processing cost"
+        sensitivity_summary["family"].isin(
+            ["Base case", "Technology"]
+        )
+    ][
+        [
+            "scenario",
+            "total_cost",
+            "cost_change",
+            "transport_cost",
+            "n_open",
+            "tier_mix",
+            "closed_vs_base",
+        ]
     ]
     return
 
@@ -2120,13 +3216,9 @@ def _(mo):
     mo.md(r"""
     #### Interpretation
 
-    Increasing the assumed processing costs by 20% and 50% raises total
-    annual cost by only approximately 1.3% and 3.1%.
-
-    Processing cost therefore represents a comparatively small share of the
-    modeled total cost. The network is more sensitive to transportation-cost
-    changes than to proportional changes in the assumed variable
-    processing-cost rates.
+    Longer shifts enable consolidation. Doubling the usable shift to 900 minutes lowers total cost by only 3.1 %, but reduces the number of open centers from 25 to 21 and reassigns 68.3 % of all customer regions — by far the largest structural upheaval of any scenario.
+    The mechanism is the reachability matrix. At 450 minutes, a region is only reachable within 225 minutes of one-way travel; at 900 minutes, that limit doubles. Regions that previously had to be served by a nearby center can now be reached from a distant one, and the round-trip time is amortised over far more stops per shift. The tier mix confirms the consequence: small centers disappear entirely (s: 8 → 0) and medium-sized centers absorb their volume (m: 14 → 17).
+    Interpretive caveat. This scenario is the computationally hardest of the five, because doubling reachability substantially enlarges the model. It terminated with a residual MIP gap of 13.9 %, compared with 2–3 % for all other scenarios. The direction of the effect — technology favours fewer, larger, more distant hubs — is robust, but the specific figures (21 locations, €195.8M) should be treated as indicative rather than precise. A tighter solve would likely find an even lower cost, strengthening rather than reversing the conclusion.
     """)
     return
 
@@ -2134,24 +3226,34 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### 6.4 New Technology
+    ### 6.6 Robustness of the Economies-of-Scale Assumption
 
-    The technology scenarios separate two effects:
-
-    - lower transport cost per shift;
-    - shorter travel times.
-
-    The combined scenario applies both effects simultaneously. Shift length
-    is kept at 450 minutes so that changes in cost, speed, and operating time
-    are not mixed into one assumption.
+    The base case dampens the fixed-cost ratio with α=0.5\alpha = 0.5
+    α=0.5. The extreme case α=1.0\alpha = 1.0
+    α=1.0 passes the observed fixed-cost ratio through to variable processing cost unchanged, making large centers maximally attractive per delivery — a 26.7× advantage for the largest tier instead of 5.2×.
+    If the network survives this, the tier structure does not depend on the dampening assumption, and the base case is safe.
     """)
     return
 
 
 @app.cell
-def _(sensitivity_summary):
+def _(mo, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
     sensitivity_summary[
-        sensitivity_summary["family"] == "Technology"
+        sensitivity_summary["family"].isin(
+            ["Base case", "Model assumptions"]
+        )
+    ][
+        [
+            "scenario",
+            "total_cost",
+            "cost_change",
+            "processing_cost",
+            "n_open",
+            "tier_mix",
+            "regions_reassigned",
+        ]
     ]
     return
 
@@ -2159,18 +3261,13 @@ def _(sensitivity_summary):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### Interpretation
+    ### Interpretation
 
-    Reducing the transport cost per shift lowers total annual cost by
-    approximately 40.4%. Reducing travel time by 20% lowers total cost by
-    approximately 6.6%, while the combined technology scenario produces a
-    reduction of approximately 47.4%.
-
-    Within the tested assumptions, the cost effect of automation is therefore
-    driven mainly by the lower shift cost. Faster travel provides an
-    additional benefit, but its isolated impact is considerably smaller.
-    These values are scenario results and should not be interpreted as a
-    technology forecast.
+    Cost-robust, structurally fluid. Passing the fixed-cost ratio through undamped (α=1.0\alpha = 1.0
+    α=1.0, a 26.7× per-delivery advantage for the largest tier instead of 5.2×) changes total cost by just −1.0 %. Variable processing cost falls from €9.1M to €5.1M, but because processing accounts for under 5 % of the objective, the total barely moves.
+    The network structure, however, does move: 28 locations instead of 25, eleven facilities flipped, and 34.2 % of regions reassigned. The dampening exponent is therefore not a driver of total cost, but it does shift which specific centers are selected.
+    This is a useful result rather than a problem. It confirms that the base case's headline economics do not depend on the α=0.5\alpha = 0.5
+    α=0.5 assumption, while flagging that individual facility decisions near the margin should not be attributed to the scale assumption alone.
     """)
     return
 
@@ -2178,13 +3275,78 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 7. Robust Recommendation
+    ### 6.7 Cost Robustness vs. Structural Robustness
 
-    A location is considered robust when it is supported by both model
-    formulations and remains selected across several independent scenario
-    families. Scenarios within the same family are aggregated before the
-    final classification so that a family with more tested parameter values
-    does not receive disproportionate weight.
+    A scenario can shift total cost substantially without changing the network, and a modest cost change can flip facility decisions when two solutions are nearly equivalent. These are different questions, and the recommendation depends on the second.
+    """)
+    return
+
+
+@app.cell
+def _(mo, plt, run_sensitivity, sensitivity_summary):
+    mo.stop(not run_sensitivity.value)
+
+    _plot_df = sensitivity_summary[
+        sensitivity_summary["family"] != "Base case"
+    ].copy()
+
+    _fig, _ax = plt.subplots(figsize=(8, 5))
+
+    _ax.scatter(
+        _plot_df["cost_change"].abs(),
+        _plot_df["regions_reassigned"],
+        s=80,
+        alpha=0.7,
+    )
+
+    for _row in _plot_df.itertuples():
+        _ax.annotate(
+            _row.scenario,
+            (
+                abs(_row.cost_change),
+                _row.regions_reassigned,
+            ),
+            fontsize=8,
+            xytext=(5, 5),
+            textcoords="offset points",
+        )
+
+    _ax.set_xlabel("Absolute change in total cost vs. base case")
+    _ax.set_ylabel("Share of regions reassigned")
+    _ax.set_title(
+        "Cost robustness vs. structural robustness\n"
+        "(top-left = network flips cheaply; "
+        "bottom-right = expensive but structurally stable)"
+    )
+    _ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Interpretation
+
+    |Scenario|Cost Change| Reassigned Regions |
+    |---|---|---|
+    |Rising transport cost|+15,6 %| 27,4 %
+    |Full scale effect|−1,0 %|34,2 %
+    |Extended operating time| -3,1 %|68,3 %
+
+    The scatter reveals that cost sensitivity and structural sensitivity are largely decoupled, and in this network even inversely related. The scenario with the largest cost impact (rising transport cost, +15.6 %) produces the least structural change: the network simply thickens along its existing geography. Conversely, the scenarios with almost no cost impact — the scale-effect assumption (−1.0 %) and extended operating time (−3.1 %) — trigger the largest reallocation of customer regions.
+    The practical implication is direct. Forecasting total cost accurately requires getting demand and transport cost right. Deciding which specific centers to close requires getting the technology and capacity assumptions right — and these are precisely the assumptions with the weakest empirical foundation. Cost projections and closure decisions therefore carry different kinds of risk and should not be defended with the same evidence.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### 6.8 Robust Recomendation
+
+    A location is considered robust when it is open in the base case and remains open across the external scenario families. Families are weighted equally, so a family with more tested values does not dominate.
     """)
     return
 
@@ -2193,265 +3355,138 @@ def _(mo):
 def _(
     CITY_BY_WAREHOUSE,
     WAREHOUSE_IDS,
-    basic_result,
-    course_result,
-    demand_course_results,
+    mo,
     np,
     pd,
-    processing_course_results,
-    shift_course_results,
-    technology_course_results,
+    realistic_result,
+    run_sensitivity,
+    scenario_results,
 ):
-    _demand_family_results = [
-        result
-        for factor, result in demand_course_results.items()
-        if factor != 1.0
-        and result["status"] == "Optimal"
-    ]
+    mo.stop(not run_sensitivity.value)
 
-    _shift_cost_family_results = [
-        result
-        for factor, result in shift_course_results.items()
-        if factor != 1.0
-        and result["status"] == "Optimal"
-    ]
+    _external = {
+        f: s
+        for f, s in scenario_results.items()
+        if f != "Model assumptions"
+    }
 
-    _processing_cost_family_results = [
-        result
-        for factor, result in processing_course_results.items()
-        if factor != 1.0
-        and result["status"] == "Optimal"
-    ]
+    _robust_rows = []
 
-    _technology_family_results = [
-        result
-        for scenario_name, result
-        in technology_course_results.items()
-        if scenario_name != "base"
-        and result["status"] == "Optimal"
-    ]
+    for _w in WAREHOUSE_IDS:
 
+        _base_open = _w in realistic_result["open_centers"]
 
-    def _calculate_open_rate(
-        warehouse_id,
-        family_results,
-    ):
-        """Share of scenarios in which a warehouse remains open."""
-
-        if not family_results:
-            return np.nan
-
-        return np.mean(
-            [
-                warehouse_id in result["open_centers"]
-                for result in family_results
+        _family_rates = {}
+        for _family, _scenarios in _external.items():
+            _valid = [
+                r
+                for r in _scenarios.values()
+                if r["status"] == "Optimal"
             ]
-        )
+            _family_rates[_family] = (
+                np.mean([_w in r["open_centers"] for r in _valid])
+                if _valid
+                else np.nan
+            )
 
-
-    robustness_rows = []
-
-    for warehouse_id in WAREHOUSE_IDS:
-        basic_base_open = (
-            basic_result["status"] == "Optimal"
-            and warehouse_id
-            in basic_result["open_centers"]
-        )
-
-        course_base_open = (
-            course_result["status"] == "Optimal"
-            and warehouse_id
-            in course_result["open_centers"]
-        )
-
-        demand_open_rate = _calculate_open_rate(
-            warehouse_id,
-            _demand_family_results,
-        )
-
-        shift_cost_open_rate = _calculate_open_rate(
-            warehouse_id,
-            _shift_cost_family_results,
-        )
-
-        processing_cost_open_rate = _calculate_open_rate(
-            warehouse_id,
-            _processing_cost_family_results,
-        )
-
-        technology_open_rate = _calculate_open_rate(
-            warehouse_id,
-            _technology_family_results,
-        )
-
-        family_rates = [
-            demand_open_rate,
-            shift_cost_open_rate,
-            processing_cost_open_rate,
-            technology_open_rate,
-        ]
-
-        family_support = sum(
+        _support = sum(
             rate >= 0.5
-            for rate in family_rates
+            for rate in _family_rates.values()
             if pd.notna(rate)
         )
-
-        robustness_rows.append(
-            {
-                "warehouseID": warehouse_id,
-                "city": CITY_BY_WAREHOUSE[
-                    warehouse_id
-                ],
-                "basic_base_open": basic_base_open,
-                "course_base_open": course_base_open,
-                "demand_open_rate": demand_open_rate,
-                "shift_cost_open_rate": (
-                    shift_cost_open_rate
-                ),
-                "processing_cost_open_rate": (
-                    processing_cost_open_rate
-                ),
-                "technology_open_rate": (
-                    technology_open_rate
-                ),
-                "family_support": family_support,
-            }
+        _n_families = sum(
+            pd.notna(r) for r in _family_rates.values()
         )
 
+        _robust_rows.append({
+            "warehouseID": _w,
+            "city": CITY_BY_WAREHOUSE[_w],
+            "base_open": _base_open,
+            **{
+                f"{f}_rate": r
+                for f, r in _family_rates.items()
+            },
+            "family_support": _support,
+            "n_families": _n_families,
+        })
 
-    robustness_df = pd.DataFrame(
-        robustness_rows
+    robustness_df = pd.DataFrame(_robust_rows)
+
+
+    def classify(row):
+        if row["base_open"] and row["family_support"] == row["n_families"]:
+            return "Retain – robust"
+        if row["base_open"] and row["family_support"] >= 1:
+            return "Retain – conditional"
+        if not row["base_open"] and row["family_support"] == 0:
+            return "Closure candidate – robust"
+        return "Scenario-dependent – verify before closure"
+
+
+    robustness_df["recommendation"] = robustness_df.apply(
+        classify, axis=1
     )
 
-    robustness_df
+    mo.ui.table(
+        robustness_df.sort_values(
+            ["recommendation", "family_support", "city"],
+            ascending=[True, False, True],
+        ),
+        selection=None,
+        pagination=True,
+    )
     return (robustness_df,)
 
 
 @app.cell
-def _(pd, robustness_df):
-    def classify_location(_row):
-        open_in_both = (
-            _row["basic_base_open"]
-            and _row["course_base_open"]
-        )
+def _(mo, robustness_df, run_sensitivity):
+    mo.stop(not run_sensitivity.value)
 
-        open_in_either = (
-            _row["basic_base_open"]
-            or _row["course_base_open"]
+    _groups = {
+        label: sorted(
+            robustness_df.loc[
+                robustness_df["recommendation"] == label,
+                "city",
+            ]
         )
-
-        scenario_rates = [
-        _row["demand_open_rate"],
-        _row["shift_cost_open_rate"],
-        _row["processing_cost_open_rate"],
-        _row["technology_open_rate"],
+        for label in [
+            "Retain – robust",
+            "Retain – conditional",
+            "Scenario-dependent – verify before closure",
+            "Closure candidate – robust",
         ]
+    }
 
-        never_open_in_scenarios = all(
-            pd.isna(rate) or rate == 0
-            for rate in scenario_rates
+    mo.md(
+        "### Recommended Decision Structure\n\n"
+        + "\n\n".join(
+            f"**{label}** ({len(cities)})  \n"
+            + (", ".join(cities) or "None")
+            for label, cities in _groups.items()
         )
+        + """
 
-        if (
-            open_in_both
-            and _row["family_support"] >= 3
-        ):
-            return "Retain – robust"
-
-        if (
-            open_in_either
-            and _row["family_support"] >= 1
-        ):
-            return "Retain – conditional"
-
-        if (
-            not open_in_either
-            and never_open_in_scenarios
-        ):
-            return "Closure candidate – robust"
-
-        return "Scenario-dependent – verify before closure"
-
-
-    robustness_df["recommendation"] = (
-        robustness_df.apply(
-            classify_location,
-            axis=1,
-        )
-    )
-
-    robustness_df.sort_values(
-        [
-            "recommendation",
-            "family_support",
-            "city",
-        ],
-        ascending=[True, False, True],
+    The robust-retain group forms the strategic core of the future network.
+    Conditional locations are supported by the base case but sensitive to
+    individual external shocks. Scenario-dependent locations require
+    operational validation before an irreversible closure decision.
+    Robust closure candidates should still be phased out gradually rather
+    than closed simultaneously.
+    """
     )
     return
 
 
-@app.cell
-def _(mo, robustness_df):
-    recommendation_counts = (
-        robustness_df["recommendation"]
-        .value_counts()
-    )
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 6.9 Conclusion of the Sensitivity Analysis
 
-    robust_retain_cities = sorted(
-        robustness_df.loc[
-            robustness_df["recommendation"]
-            == "Retain – robust",
-            "city",
-        ].tolist()
-    )
-
-    conditional_cities = sorted(
-        robustness_df.loc[
-            robustness_df["recommendation"]
-            == "Retain – conditional",
-            "city",
-        ].tolist()
-    )
-
-    scenario_dependent_cities = sorted(
-        robustness_df.loc[
-            robustness_df["recommendation"]
-            == "Scenario-dependent – verify before closure",
-            "city",
-        ].tolist()
-    )
-
-    closure_candidate_cities = sorted(
-        robustness_df.loc[
-            robustness_df["recommendation"]
-            == "Closure candidate – robust",
-            "city",
-        ].tolist()
-    )
-
-    mo.md(f"""
-    ### Recommended Decision Structure
-
-    **Robust retain locations:**  
-    {", ".join(robust_retain_cities) or "None"}
-
-    **Conditional retain locations:**  
-    {", ".join(conditional_cities) or "None"}
-
-    **Scenario-dependent locations:**  
-    {", ".join(scenario_dependent_cities) or "None"}
-
-    **Robust closure candidates:**  
-    {", ".join(closure_candidate_cities) or "None"}
-
-    The robust-retain group forms the strategic core of the future network.
-    Conditional locations are generally supported but remain sensitive to
-    individual assumptions. Scenario-dependent locations require additional
-    operational validation before an irreversible closure decision is made.
-    Robust closure candidates should still be reviewed through a phased
-    implementation process rather than closed simultaneously.
+    The sensitivity analysis supports three conclusions.
+    First, the cost projections are robust. Total cost responds predictably and proportionally to the two external factors with a solid empirical basis: demand and transport cost. The internal calibration assumptions (α\alpha
+    α, the processing-cost anchor) move total cost by around one percent and are therefore not material to the business case.
+    Second, the strategic response to declining cash usage is downsizing, not closure. Across a 50 % demand decline, the facility count falls only from 25 to 23, while the size distribution collapses towards the smallest tiers. Geographic coverage retains its value even at halved volume; excess processing capacity does not. This is an operationally very different recommendation from network consolidation, and it is the most decision-relevant finding of the analysis.
+    Third, the facility-level recommendation is considerably less robust than the cost recommendation. Between 27 % and 68 % of customer regions are reassigned depending on the scenario, and no single facility set survives all five scenarios unchanged. The final recommendation must therefore distinguish between the strategic core of the network and locations whose fate depends on assumptions the data cannot settle.
     """)
     return
 
